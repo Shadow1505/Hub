@@ -136,7 +136,7 @@ local function GetCurrentMapName()
 end
 
 -- ========================================================
--- 3. ALGORITMA TRACKER ITEM & INVENTORI
+-- 3. ALGORITMA TRACKER ITEM & INVENTORI (REVISED)
 -- ========================================================
 local function GetDetailedItemCounts()
     local counts = { Runic = 0, Evolved = 0, Forgotten = 0, Secret = 0 }
@@ -146,18 +146,33 @@ local function GetDetailedItemCounts()
         for _, item in ipairs(container:GetChildren()) do
             local nameLower = string.lower(item.Name)
             local valObj = item:FindFirstChild("Value") or item:FindFirstChild("Amount") or item:FindFirstChild("Count")
-            local amount = valObj and valObj.Value or 1
+            local amount = (valObj and type(valObj.Value) == "number") and valObj.Value or 1
 
-            if string.find(nameLower, "runic enchant stone") or string.find(nameLower, "runic stone") then
+            -- Deteksi Relic / Enchant Stone (Fisch menggunakan nama 'Relic')
+            if string.find(nameLower, "runic") then
                 counts.Runic = counts.Runic + amount
-            elseif string.find(nameLower, "evolved enchant stone") or string.find(nameLower, "evolved stone") then
+            elseif string.find(nameLower, "evolved") then
                 counts.Evolved = counts.Evolved + amount
-            elseif string.find(nameLower, "forgotten") then
+            elseif string.find(nameLower, "enchant") or string.find(nameLower, "relic") then
+                counts.Runic = counts.Runic + amount
+            end
+
+            -- Deteksi Forgotten Fish / Item
+            if string.find(nameLower, "forgotten") then
                 counts.Forgotten = counts.Forgotten + amount
             end
 
-            local rarity = item:GetAttribute("Rarity") or item:FindFirstChild("Rarity")
-            local rarityStr = rarity and tostring(rarity.Value or rarity) or ""
+            -- Deteksi Secret Fish (Cek Attribute & Name)
+            local rarityAttr = item:GetAttribute("Rarity") or item:GetAttribute("Tier") or item:GetAttribute("Quality")
+            local rarityChild = item:FindFirstChild("Rarity") or item:FindFirstChild("Tier")
+            local rarityStr = ""
+
+            if rarityAttr then
+                rarityStr = tostring(rarityAttr)
+            elseif rarityChild then
+                rarityStr = tostring(rarityChild.Value or rarityChild)
+            end
+
             if string.find(string.lower(rarityStr), "secret") or string.find(nameLower, "secret") then
                 counts.Secret = counts.Secret + amount
             end
