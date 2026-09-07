@@ -13,7 +13,51 @@ local workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 
 -- ========================================================
--- 1. DATA KOORDINAT & VARIABEL SISTEM
+-- 1. CONFIG SYSTEM (SAVE / LOAD AUTOMATIC)
+-- ========================================================
+local ConfigFileName = "ShadowHub_Config.json"
+local ConfigData = {
+    AutoTP = false,
+    AutoRotate = false,
+    AutoShake = false,
+    AutoSell = false,
+    LegitFishing = false,
+    InstantFishing = false,
+    ModeCast = "Perfect",
+    InstantDelay = 0.4,
+    InstantFastReel = false,
+    FPSBooster = false,
+    Disable3D = false,
+    ClearWater = false,
+    Limit30FPS = false,
+    AutoRAM = false,
+    AntiAFK = true,
+    WebhookURL = ""
+}
+
+local function SaveConfig()
+    if writefile then
+        pcall(function()
+            writefile(ConfigFileName, HttpService:JSONEncode(ConfigData))
+        end)
+    end
+end
+
+local function LoadConfig()
+    if isfile and isfile(ConfigFileName) and readfile then
+        pcall(function()
+            local decoded = HttpService:JSONDecode(readfile(ConfigFileName))
+            for k, v in pairs(decoded) do
+                ConfigData[k] = v
+            end
+        end)
+    end
+end
+
+LoadConfig() -- Auto-Load saat script dieksekusi
+
+-- ========================================================
+-- 2. DATA KOORDINAT & VARIABEL SISTEM
 -- ========================================================
 local spotKordinat = {
     Board = CFrame.lookAt(Vector3.new(-855.63, 44.43, 5187.01), Vector3.new(-855.63, 44.43, 5187.01) + Vector3.new(0, 0, 1)),
@@ -28,26 +72,35 @@ local DatabaseIconCuaca = {
     ["76632496002371"]  = "Volcano",
 }
 
--- STATE CONTROL
-local autoTeleportAktif = false
 local posisiSimpanan = nil
-
-local autoRotateAktif = false
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
 local currentPoolIndex = 1
 local rotateInterval = 3600
 
-local autoShakeAktif = false
-local autoSellAktif = false
-local autoRAMCleaner = false
-local antiAfKAktif = true
-
-local webhookURL = ""
-
 -- ========================================================
--- 2. ALGORITMA CORE & OPTIMIZERS
+-- 3. ALGORITMA CORE & ITEM TRACKER
 -- ========================================================
+local function GetItemCount(itemName)
+    local count = 0
+    local backpack = player:FindFirstChild("Backpack")
+    local char = player.Character
+
+    local function checkContainer(container)
+        if not container then return end
+        for _, item in ipairs(container:GetChildren()) do
+            if string.find(string.lower(item.Name), string.lower(itemName)) then
+                local val = item:FindFirstChild("Value") or item:FindFirstChild("Amount") or item:FindFirstChild("Count")
+                count = count + (val and val.Value or 1)
+            end
+        end
+    end
+
+    checkContainer(backpack)
+    checkContainer(char)
+    return count
+end
+
 local function GetEventScheduleWIB()
     local utc_time = os.time()
     local wib_time = utc_time + (7 * 3600)
@@ -108,29 +161,21 @@ local function PulangKeSetPos()
     end
 end
 
-local function FireDirectAutoSell()
+local function SendDiscordWebhook()
+    if ConfigData.WebhookURL == "" then return end
     pcall(function()
-        local net = ReplicatedStorage:FindFirstChild("packages") and ReplicatedStorage.packages:FindFirstChild("Net")
-        if net and net:FindFirstChild("RE/Merchant/SellAll") then
-            net["RE/Merchant/SellAll"]:FireServer()
-        elseif ReplicatedStorage:FindFirstChild("events") and ReplicatedStorage.events:FindFirstChild("selleverything") then
-            ReplicatedStorage.events.selleverything:InvokeServer()
-        end
-    end)
-end
-
-local function SendDiscordWebhook(msg)
-    if webhookURL == "" then return end
-    pcall(function()
+        local runic = GetItemCount("Runic Enchant Stone")
+        local evolved = GetItemCount("Evolved Enchant Stone")
+        
         local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
         if req then
             req({
-                Url = webhookURL,
+                Url = ConfigData.WebhookURL,
                 Method = "POST",
                 Headers = {["Content-Type"] = "application/json"},
                 Body = HttpService:JSONEncode({
-                    username = "Shadow Hub Tracker",
-                    content = "```" .. msg .. "```"
+                    username = "Shadow Hub Reporter",
+                    content = string.format("```\n👤 USERNAME: %s\n🟢 STATUS: ONLINE & ACTIVE\n--------------------------------\n🗿 Runic Enchant Stone: %d\n⚡ Evolved Enchant Stone: %d\n```", player.Name, runic, evolved)
                 })
             })
         end
@@ -138,10 +183,10 @@ local function SendDiscordWebhook(msg)
 end
 
 -- ========================================================
--- 3. UI SYSTEM & MODERN SIDEBAR
+-- 4. UI SYSTEM (SHADOW PANEL V7)
 -- ========================================================
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "Shadow_Panel_V6"
+ScreenGui.Name = "Shadow_Panel_V7"
 local targetGui = (gethui and gethui()) or game:GetService("CoreGui") or player.PlayerGui
 ScreenGui.Parent = targetGui
 
@@ -160,40 +205,18 @@ Instance.new("UICorner", LogoBtn).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", LogoBtn).Color = c_accent; LogoBtn.UIStroke.Thickness = 2
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 540, 0, 330); MainFrame.Position = UDim2.new(0.5, -270, 0.5, -165)
+MainFrame.Size = UDim2.new(0, 540, 0, 340); MainFrame.Position = UDim2.new(0.5, -270, 0.5, -170)
 MainFrame.BackgroundColor3 = c_bg; MainFrame.Active = true; MainFrame.Draggable = true
 MainFrame.Visible = false; MainFrame.ClipsDescendants = true
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(40, 40, 50); MainFrame.UIStroke.Thickness = 1
-
-local ResizeGrip = Instance.new("TextButton", MainFrame)
-ResizeGrip.Size = UDim2.new(0, 18, 0, 18); ResizeGrip.Position = UDim2.new(1, -18, 1, -18)
-ResizeGrip.BackgroundTransparency = 1; ResizeGrip.Text = "◢"; ResizeGrip.TextColor3 = c_subtext
-ResizeGrip.Font = Enum.Font.GothamBold; ResizeGrip.TextSize = 12; ResizeGrip.ZIndex = 10
-
-local isResizing, dragStartPos, startSize
-ResizeGrip.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        isResizing = true; dragStartPos = input.Position; startSize = MainFrame.Size
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then isResizing = false end
-        end)
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if isResizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStartPos
-        MainFrame.Size = UDim2.new(0, math.max(420, startSize.X.Offset + delta.X), 0, math.max(240, startSize.Y.Offset + delta.Y))
-    end
-end)
 
 local Header = Instance.new("Frame", MainFrame)
 Header.Size = UDim2.new(1, 0, 0, 40); Header.BackgroundTransparency = 1
 
 local TitleLabel = Instance.new("TextLabel", Header)
 TitleLabel.Size = UDim2.new(0.4, 0, 1, 0); TitleLabel.Position = UDim2.new(0, 15, 0, 0)
-TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW HUB V6"
+TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW HUB V7"
 TitleLabel.TextColor3 = c_accent; TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.TextSize = 13
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -202,7 +225,6 @@ DiscordBtn.Size = UDim2.new(0, 130, 0, 24); DiscordBtn.Position = UDim2.new(1, -
 DiscordBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 32); DiscordBtn.Text = "discord.gg/shadow"
 DiscordBtn.TextColor3 = Color3.fromRGB(180, 180, 190); DiscordBtn.Font = Enum.Font.GothamSemibold; DiscordBtn.TextSize = 10
 Instance.new("UICorner", DiscordBtn).CornerRadius = UDim.new(0, 6)
-Instance.new("UIStroke", DiscordBtn).Color = Color3.fromRGB(50, 50, 65)
 
 DiscordBtn.MouseButton1Click:Connect(function()
     if setclipboard then
@@ -266,12 +288,12 @@ local function CreateTab(name, active)
 end
 
 -- PAGE CREATION
-local TabAutomation = CreateTab("⚡ Automation", true)
-local TabFishing    = CreateTab("🎣 Fishing Core", false)
+local TabFishing    = CreateTab("🎣 Auto Fishing", true)
+local TabAutomation = CreateTab("⚡ Automation", false)
 local TabBooster    = CreateTab("🚀 Booster & RAM", false)
-local TabUtility    = CreateTab("🛡️ Utility", false)
+local TabConfig     = CreateTab("⚙️ Config & Webhook", false)
 
--- UI BUILDER HELPERS
+-- UI BUILDERS
 local function CreateDropdown(parent, titleText)
     local DropdownFrame = Instance.new("Frame", parent)
     DropdownFrame.Size = UDim2.new(1, -10, 0, 38); DropdownFrame.BackgroundColor3 = c_content
@@ -304,7 +326,7 @@ local function CreateDropdown(parent, titleText)
     return ItemsContainer
 end
 
-local function CreateToggle(parent, text, callback)
+local function CreateToggle(parent, text, configKey, callback)
     local Frame = Instance.new("Frame", parent)
     Frame.Size = UDim2.new(0.95, 0, 0, 32); Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
     Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 6)
@@ -316,23 +338,28 @@ local function CreateToggle(parent, text, callback)
     
     local ToggleBtn = Instance.new("TextButton", Frame)
     ToggleBtn.Size = UDim2.new(0, 36, 0, 18); ToggleBtn.Position = UDim2.new(1, -45, 0.5, -9)
-    ToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70); ToggleBtn.Text = ""
+    ToggleBtn.BackgroundColor3 = ConfigData[configKey] and c_accent or Color3.fromRGB(60, 60, 70); ToggleBtn.Text = ""
     Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0)
     
     local Circle = Instance.new("Frame", ToggleBtn)
-    Circle.Size = UDim2.new(0, 14, 0, 14); Circle.Position = UDim2.new(0, 2, 0.5, -7)
+    Circle.Size = UDim2.new(0, 14, 0, 14)
+    Circle.Position = ConfigData[configKey] and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
     Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     Instance.new("UICorner", Circle).CornerRadius = UDim.new(1, 0)
     
-    local state = false
+    local state = ConfigData[configKey] or false
     ToggleBtn.MouseButton1Click:Connect(function()
         state = not state
+        ConfigData[configKey] = state
+        SaveConfig()
+        
         local targetColor = state and c_accent or Color3.fromRGB(60, 60, 70)
         local targetPos = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
         TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
         TweenService:Create(Circle, TweenInfo.new(0.2), {Position = targetPos}):Play()
-        callback(state)
+        if callback then callback(state) end
     end)
+    if state and callback then callback(state) end
 end
 
 local function CreateButton(parent, text, callback)
@@ -345,18 +372,23 @@ local function CreateButton(parent, text, callback)
     return Btn
 end
 
-local function CreateTextBox(parent, placeholder, callback)
+local function CreateTextBox(parent, placeholder, configKey, callback)
     local BoxFrame = Instance.new("Frame", parent)
     BoxFrame.Size = UDim2.new(0.95, 0, 0, 32); BoxFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     Instance.new("UICorner", BoxFrame).CornerRadius = UDim.new(0, 6)
     
     local Box = Instance.new("TextBox", BoxFrame)
     Box.Size = UDim2.new(1, -20, 1, 0); Box.Position = UDim2.new(0, 10, 0, 0)
-    Box.BackgroundTransparency = 1; Box.PlaceholderText = placeholder; Box.Text = ""
-    Box.TextColor3 = c_text; Box.PlaceholderColor3 = c_subtext; Box.Font = Enum.Font.GothamSemibold; Box.TextSize = 10
+    Box.BackgroundTransparency = 1; Box.PlaceholderText = placeholder
+    Box.Text = tostring(ConfigData[configKey] or ""); Box.TextColor3 = c_text
+    Box.PlaceholderColor3 = c_subtext; Box.Font = Enum.Font.GothamSemibold; Box.TextSize = 10
     Box.TextXAlignment = Enum.TextXAlignment.Left; Box.ClearTextOnFocus = false
     
-    Box.FocusLost:Connect(function() callback(Box.Text) end)
+    Box.FocusLost:Connect(function()
+        ConfigData[configKey] = Box.Text
+        SaveConfig()
+        if callback then callback(Box.Text) end
+    end)
 end
 
 local function CreateStatusLabel(parent)
@@ -370,15 +402,29 @@ local function CreateStatusLabel(parent)
 end
 
 -- ========================================================
--- 4. PENGISIAN MENU DI TIGA TAB UTAMA
+-- 5. MENU FISHING CORE (ADAPTASI LYNXX PANEL)
+-- ========================================================
+local DropLynx = CreateDropdown(TabFishing, "Main Fishing Automation")
+
+CreateToggle(DropLynx, "Legit Fishing", "LegitFishing", function(state) end)
+CreateToggle(DropLynx, "Instant Fishing", "InstantFishing", function(state) end)
+
+CreateTextBox(DropLynx, "Mode Cast (Normal / Perfect)", "ModeCast", function(txt) end)
+CreateTextBox(DropLynx, "Instant Delay (Contoh: 0.4)", "InstantDelay", function(txt)
+    ConfigData.InstantDelay = tonumber(txt) or 0.4
+end)
+
+CreateToggle(DropLynx, "Instant Fast Reel [BETA]", "InstantFastReel", function(state) end)
+
+-- ========================================================
+-- 6. MENU OTHER TABS
 -- ========================================================
 
--- TAB 1: AUTOMATION
+-- TAB AUTOMATION
 local DropElemental = CreateDropdown(TabAutomation, "Event Elemental TP")
 local UIStatus_Elemental = CreateStatusLabel(DropElemental)
 
-CreateToggle(DropElemental, "Enable Auto TP Cuaca", function(state)
-    autoTeleportAktif = state
+CreateToggle(DropElemental, "Enable Auto TP Cuaca", "AutoTP", function(state)
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if state then
         if hrp and not posisiSimpanan then posisiSimpanan = hrp.CFrame end
@@ -391,30 +437,14 @@ end)
 local DropRotate = CreateDropdown(TabAutomation, "Auto Rotate Fishing")
 local UIStatus_Rotate = CreateStatusLabel(DropRotate)
 
-CreateToggle(DropRotate, "Enable Auto Rotate (1 Jam)", function(state)
-    autoRotateAktif = state
+CreateToggle(DropRotate, "Enable Auto Rotate (1 Jam)", "AutoRotate", function(state)
     if not state then
         UIStatus_Rotate.Text = "AUTO ROTATE: OFF"
         UIStatus_Rotate.TextColor3 = c_subtext
     end
 end)
 
--- TAB 2: FISHING CORE
-local DropMechanics = CreateDropdown(TabFishing, "Core Fishing Mechanics")
-
-CreateToggle(DropMechanics, "Instant Shake Bypass", function(state)
-    autoShakeAktif = state
-end)
-
-CreateToggle(DropMechanics, "Direct Remote Auto Sell", function(state)
-    autoSellAktif = state
-end)
-
-CreateButton(DropMechanics, "Sell All Now (Instant)", function()
-    FireDirectAutoSell()
-end)
-
--- TAB 3: BOOSTER & RAM
+-- TAB BOOSTER
 local DropBooster = CreateDropdown(TabBooster, "Graphic & Performance Booster")
 
 local function nukeVisuals(obj)
@@ -432,7 +462,7 @@ local function nukeVisuals(obj)
     end)
 end
 
-CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", function(state)
+CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state)
     if state then
         pcall(function()
             if setfpscap then setfpscap(60) end
@@ -445,9 +475,7 @@ CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", function(state)
             pcall(function()
                 local variant = Instance.new("MaterialVariant")
                 variant.Name = "Nuke_" .. mat.Name
-                variant.BaseMaterial = mat
-                variant.ColorMap = ""
-                variant.Parent = MaterialService
+                variant.BaseMaterial = mat; variant.ColorMap = ""; variant.Parent = MaterialService
                 MaterialService:SetMaterialOverride(mat, variant.Name)
             end)
         end
@@ -458,11 +486,11 @@ CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", function(state)
     end
 end)
 
-CreateToggle(DropBooster, "Disable 3D Rendering (GPU Saver)", function(state)
+CreateToggle(DropBooster, "Disable 3D Rendering (GPU Saver)", "Disable3D", function(state)
     RunService:Set3dRenderingEnabled(not state)
 end)
 
-CreateToggle(DropBooster, "Clear Water & Fog Effects", function(state)
+CreateToggle(DropBooster, "Clear Water & Fog Effects", "ClearWater", function(state)
     pcall(function()
         local terrain = workspace:FindFirstChildOfClass("Terrain")
         if terrain then
@@ -475,68 +503,52 @@ CreateToggle(DropBooster, "Clear Water & Fog Effects", function(state)
     end)
 end)
 
-CreateToggle(DropBooster, "Limit 30 FPS (Cold AFK)", function(state)
+CreateToggle(DropBooster, "Limit 30 FPS (Cold AFK)", "Limit30FPS", function(state)
     if setfpscap then setfpscap(state and 30 or 60) end
 end)
 
-CreateToggle(DropBooster, "Auto RAM Cleaner (60s)", function(state)
-    autoRAMCleaner = state
+CreateToggle(DropBooster, "Auto RAM Cleaner (60s)", "AutoRAM", function(state) end)
+
+-- TAB CONFIG & WEBHOOK
+local DropConfigSystem = CreateDropdown(TabConfig, "Configuration Manager")
+
+CreateButton(DropConfigSystem, "💾 Save UI Settings Manual", function()
+    SaveConfig()
 end)
 
--- TAB 4: UTILITY & WEBHOOK
-local DropUtility = CreateDropdown(TabUtility, "System & Protection")
-
-CreateToggle(DropUtility, "Engine Anti-AFK (VirtualUser)", function(state)
-    antiAfKAktif = state
+CreateButton(DropConfigSystem, "🔄 Load UI Settings Manual", function()
+    LoadConfig()
 end)
 
-CreateButton(DropUtility, "Set Save Position", function()
-    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if hrp then posisiSimpanan = hrp.CFrame end
-end)
+local DropWebhook = CreateDropdown(TabConfig, "Discord Webhook (30m Interval)")
 
-CreateButton(DropUtility, "Force Return Position", function() PulangKeSetPos() end)
+CreateTextBox(DropWebhook, "Paste Discord Webhook URL...", "WebhookURL", function(txt) end)
 
-local DropWebhook = CreateDropdown(TabUtility, "Discord Webhook Tracker")
-
-CreateTextBox(DropWebhook, "Paste Discord Webhook URL...", function(txt)
-    webhookURL = txt
-end)
-
-CreateButton(DropWebhook, "Send Manual Test Report", function()
-    local leaderstats = player:FindFirstChild("leaderstats")
-    local cVal = leaderstats and leaderstats:FindFirstChild("C$") and leaderstats["C$"].Value or "N/A"
-    SendDiscordWebhook("👤 User: " .. player.Name .. "\n💰 Balance: C$ " .. tostring(cVal) .. "\n🟢 Status: ONLINE & ACTIVE")
+CreateButton(DropWebhook, "Send Manual Webhook Report", function()
+    SendDiscordWebhook()
 end)
 
 -- ==========================================================
--- 5. ASYNCHRONOUS BACKGROUND THREADS (OPTIMIZED LOW-CPU)
+-- 7. BACKGROUND THREADS & AUTO FISHING ENGINE
 -- ==========================================================
 
--- Anti-AFK Signal Hook
-player.Idled:Connect(function()
-    if antiAfKAktif then
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-    end
-end)
-
--- Auto RAM Memory Cleaner Loop
+-- AUTO FISHING INTI (BYPASS ENGINE)
 task.spawn(function()
     while true do
-        task.wait(60)
-        if autoRAMCleaner then
-            collectgarbage("collect")
-        end
-    end
-end)
-
--- Auto Shake Bypass Engine
-task.spawn(function()
-    while true do
-        task.wait(0.1)
-        if autoShakeAktif then
+        task.wait(ConfigData.InstantDelay or 0.4)
+        if ConfigData.InstantFishing or ConfigData.LegitFishing then
             pcall(function()
+                local character = player.Character
+                local tool = character and character:FindFirstChildOfClass("Tool")
+                
+                if tool and tool:FindFirstChild("events") then
+                    local castEvt = tool.events:FindFirstChild("cast") or tool.events:FindFirstChild("CastLine")
+                    if castEvt then
+                        local castType = (string.lower(ConfigData.ModeCast) == "perfect") and 100 or 50
+                        castEvt:FireServer(castType)
+                    end
+                end
+                
                 local pGui = player:FindFirstChild("PlayerGui")
                 local shakeUI = pGui and pGui:FindFirstChild("shakeui")
                 if shakeUI and shakeUI:FindFirstChild("safezone") then
@@ -548,33 +560,57 @@ task.spawn(function()
                         VirtualInputManager:SendMouseButtonEvent(px, py, 0, false, game, 0)
                     end
                 end
+                
+                if ConfigData.InstantFastReel then
+                    local reelUI = pGui and pGui:FindFirstChild("reel")
+                    if reelUI then
+                        local reelEvt = tool and tool:FindFirstChild("events") and tool.events:FindFirstChild("reelfinished")
+                        if reelEvt then reelEvt:FireServer(100, true) end
+                    end
+                end
             end)
         end
     end
 end)
 
--- Auto Sell Interval Loop (Every 2 Minutes)
+-- DISCORD WEBHOOK AUTO 30 MENIT
 task.spawn(function()
     while true do
-        task.wait(120)
-        if autoSellAktif then
-            FireDirectAutoSell()
+        task.wait(1800) -- 30 menit (1800 detik)
+        SendDiscordWebhook()
+    end
+end)
+
+-- ANTI-AFK ENGINE
+player.Idled:Connect(function()
+    if ConfigData.AntiAFK then
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end
+end)
+
+-- AUTO RAM CLEANER
+task.spawn(function()
+    while true do
+        task.wait(60)
+        if ConfigData.AutoRAM then
+            collectgarbage("collect")
         end
     end
 end)
 
--- Loop Auto TP Elemental
+-- LOOP AUTO TP ELEMENTAL
 task.spawn(function()
     while true do
         task.wait(1)
-        if autoTeleportAktif then
+        if ConfigData.AutoTP then
             local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
             if not hrp then continue end
             local schedule = GetEventScheduleWIB()
 
             if schedule.state == "COOLDOWN" then
                 PulangKeSetPos()
-                while autoTeleportAktif do
+                while ConfigData.AutoTP do
                     local realTimeSchedule = GetEventScheduleWIB()
                     if realTimeSchedule.state == "ACTIVE" then break end 
                     UIStatus_Elemental.Text = "CD: " .. formatSecondsToText(realTimeSchedule.timeLeft)
@@ -591,7 +627,7 @@ task.spawn(function()
                 local cuacaAktif = GetWeatherIconOnly()
                 if cuacaAktif then
                     local targetCFrame = spotKordinat[cuacaAktif]
-                    while autoTeleportAktif do
+                    while ConfigData.AutoTP do
                         local realTimeSchedule = GetEventScheduleWIB()
                         if realTimeSchedule.state == "COOLDOWN" then break end 
                         UIStatus_Elemental.Text = string.upper(cuacaAktif) .. ": " .. formatSecondsToText(realTimeSchedule.timeLeft)
@@ -613,10 +649,10 @@ task.spawn(function()
     end
 end)
 
--- Loop Auto Rotate 1 Jam (3600 Detik)
+-- LOOP AUTO ROTATE 1 JAM
 task.spawn(function()
     while true do
-        if autoRotateAktif then
+        if ConfigData.AutoRotate then
             local char = player.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             
@@ -637,7 +673,7 @@ task.spawn(function()
                 if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
                 
                 local elapsed = 0
-                while elapsed < rotateInterval and autoRotateAktif do
+                while elapsed < rotateInterval and ConfigData.AutoRotate do
                     local sisaDetik = rotateInterval - elapsed
                     UIStatus_Rotate.Text = "NEXT ROTATE: " .. formatSecondsToText(sisaDetik)
                     UIStatus_Rotate.TextColor3 = Color3.fromRGB(50, 255, 100)
