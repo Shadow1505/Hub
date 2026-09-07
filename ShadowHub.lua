@@ -12,11 +12,11 @@ local workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 
 -- ========================================================
--- 1. CONFIG SYSTEM (SAVE / LOAD / RESET AUTOMATIC)
+-- 1. CONFIG SYSTEM & ANTI-DC RESET
 -- ========================================================
 local ConfigFileName = "ShadowHub_Config.json"
+local UI_Updaters = {}
 
--- Data Default (Bawaan Pabrik, Mati Semua)
 local DefaultConfig = {
     AutoTP = false,
     AutoRotate = false,
@@ -26,21 +26,16 @@ local DefaultConfig = {
     Limit30FPS = false,
     AutoRAM = false,
     AntiAFK = true,
-    WebhookStatusURL = "",
-    WebhookInventoryURL = "",
-    WebhookCatchURL = ""
+    WebhookURL = "",
+    WebhookPlayer = false
 }
 
 local ConfigData = {}
-for k, v in pairs(DefaultConfig) do 
-    ConfigData[k] = v 
-end
+for k, v in pairs(DefaultConfig) do ConfigData[k] = v end
 
 local function SaveConfig()
     if writefile then
-        pcall(function()
-            writefile(ConfigFileName, HttpService:JSONEncode(ConfigData))
-        end)
+        pcall(function() writefile(ConfigFileName, HttpService:JSONEncode(ConfigData)) end)
     end
 end
 
@@ -48,9 +43,7 @@ local function LoadConfig()
     if isfile and isfile(ConfigFileName) and readfile then
         pcall(function()
             local decoded = HttpService:JSONDecode(readfile(ConfigFileName))
-            for k, v in pairs(decoded) do
-                ConfigData[k] = v
-            end
+            for k, v in pairs(decoded) do ConfigData[k] = v end
         end)
     end
 end
@@ -58,17 +51,15 @@ end
 local function ResetConfig()
     for k, v in pairs(DefaultConfig) do 
         ConfigData[k] = v 
+        if UI_Updaters[k] then UI_Updaters[k](v) end
     end
     SaveConfig()
-    if player then
-        player:Kick("Settingan berhasil direset ke Default! Silakan Rejoin agar UI kembali segar.")
-    end
 end
 
 LoadConfig()
 
 -- ========================================================
--- 2. DATA KOORDINAT & DETEKSI MAP
+-- 2. DATA KOORDINAT, DETEKSI MAP & HELPERS
 -- ========================================================
 local spotKordinat = {
     Board = CFrame.lookAt(Vector3.new(-855.63, 44.43, 5187.01), Vector3.new(-855.63, 44.43, 5187.01) + Vector3.new(0, 0, 1)),
@@ -76,113 +67,12 @@ local spotKordinat = {
     Storm = CFrame.lookAt(Vector3.new(-864.27, 56.06, 5309.37), Vector3.new(-864.27, 56.06, 5309.37) + Vector3.new(-1, 0, 1)),
     Blizzard = CFrame.lookAt(Vector3.new(-968.19, 45.83, 5345.58), Vector3.new(-968.19, 45.83, 5345.58) + Vector3.new(-1, 0, -1))
 }
-
-local DatabaseIconCuaca = {
-    ["118379404229807"] = "Blizzard",
-    ["105076841543450"] = "Storm",
-    ["76632496002371"]  = "Volcano",
-}
-
-local daftarPulau = {
-    {name = "Moosewood", pos = Vector3.new(380, 135, 230), radius = 600},
-    {name = "Roslit Bay", pos = Vector3.new(-1470, 130, 720), radius = 600},
-    {name = "Sunstone Island", pos = Vector3.new(-930, 130, -1120), radius = 500},
-    {name = "Snowcap Island", pos = Vector3.new(2600, 135, 2400), radius = 600},
-    {name = "Terrapin Island", pos = Vector3.new(-180, 140, 1900), radius = 500},
-    {name = "Mushgrove Swamp", pos = Vector3.new(2450, 130, -700), radius = 600},
-    {name = "Desolate Deep", pos = Vector3.new(-800, -600, 1200), radius = 1000},
-    {name = "Ancient Isle", pos = Vector3.new(-6000, 200, -8000), radius = 1200},
-    {name = "Keepers Sanctuary", pos = Vector3.new(-800, 130, 5300), radius = 500},
-    {name = "Forsaken Shores", pos = Vector3.new(-2500, 130, 1500), radius = 600},
-    {name = "Event Area / FischFright", pos = Vector3.new(-855, 45, 5187), radius = 400}
-}
-
+local DatabaseIconCuaca = {["118379404229807"] = "Blizzard", ["105076841543450"] = "Storm", ["76632496002371"] = "Volcano"}
 local posisiSimpanan = nil
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
 local currentPoolIndex = 1
 local rotateInterval = 3600
-
-local function GetCurrentMapName()
-    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return "Unknown Location" end
-    local pos = hrp.Position
-
-    local mapNameFromUI = nil
-    pcall(function()
-        local pGui = player:FindFirstChild("PlayerGui")
-        if pGui then
-            local hud = pGui:FindFirstChild("hud") or pGui:FindFirstChild("HUD")
-            if hud then
-                local zone = hud:FindFirstChild("zone", true) or hud:FindFirstChild("location", true)
-                if zone and zone:IsA("TextLabel") and zone.Text ~= "" then
-                    mapNameFromUI = zone.Text
-                end
-            end
-        end
-    end)
-    if mapNameFromUI then return mapNameFromUI end
-
-    local closest = "Lautan Luas (Open Ocean)"
-    local minDist = math.huge
-    for _, island in ipairs(daftarPulau) do
-        local dist = (pos - island.pos).Magnitude
-        if dist <= island.radius and dist < minDist then
-            minDist = dist
-            closest = island.name
-        end
-    end
-    return closest
-end
-
--- ========================================================
--- 3. ALGORITMA TRACKER ITEM & INVENTORI (REVISED)
--- ========================================================
-local function GetDetailedItemCounts()
-    local counts = { Runic = 0, Evolved = 0, Forgotten = 0, Secret = 0 }
-
-    local function scanContainer(container)
-        if not container then return end
-        for _, item in ipairs(container:GetChildren()) do
-            local nameLower = string.lower(item.Name)
-            local valObj = item:FindFirstChild("Value") or item:FindFirstChild("Amount") or item:FindFirstChild("Count")
-            local amount = (valObj and type(valObj.Value) == "number") and valObj.Value or 1
-
-            -- Deteksi Relic / Enchant Stone (Fisch menggunakan nama 'Relic')
-            if string.find(nameLower, "runic") then
-                counts.Runic = counts.Runic + amount
-            elseif string.find(nameLower, "evolved") then
-                counts.Evolved = counts.Evolved + amount
-            elseif string.find(nameLower, "enchant") or string.find(nameLower, "relic") then
-                counts.Runic = counts.Runic + amount
-            end
-
-            -- Deteksi Forgotten Fish / Item
-            if string.find(nameLower, "forgotten") then
-                counts.Forgotten = counts.Forgotten + amount
-            end
-
-            -- Deteksi Secret Fish (Cek Attribute & Name)
-            local rarityAttr = item:GetAttribute("Rarity") or item:GetAttribute("Tier") or item:GetAttribute("Quality")
-            local rarityChild = item:FindFirstChild("Rarity") or item:FindFirstChild("Tier")
-            local rarityStr = ""
-
-            if rarityAttr then
-                rarityStr = tostring(rarityAttr)
-            elseif rarityChild then
-                rarityStr = tostring(rarityChild.Value or rarityChild)
-            end
-
-            if string.find(string.lower(rarityStr), "secret") or string.find(nameLower, "secret") then
-                counts.Secret = counts.Secret + amount
-            end
-        end
-    end
-
-    scanContainer(player:FindFirstChild("Backpack"))
-    scanContainer(player.Character)
-    return counts
-end
 
 local function GetEventScheduleWIB()
     local utc_time = os.time()
@@ -245,56 +135,210 @@ local function PulangKeSetPos()
 end
 
 -- ========================================================
--- 4. DISCORD WEBHOOK ENGINE
+-- 3. ENGINE WEBHOOK & PLAYER TRACKER (UPDATE: DONE WEEBHOOK)
 -- ========================================================
-local function PostWebhook(url, payload)
-    if not url or url == "" then return end
-    pcall(function()
-        local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-        if req then
-            req({
+local trackedPlayers = {}
+local UIStatus_PlayerMon -- Dideklarasikan untuk diakses Global
+
+local function GetPlayerLocation(targetPlayer)
+    local char = targetPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    
+    if not hrp then 
+        return "Loading/Mati" 
+    end
+
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {char}
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+    local rayResult = workspace:Raycast(hrp.Position, Vector3.new(0, -500, 0), raycastParams)
+    
+    if rayResult and rayResult.Instance then
+        local hitInstance = rayResult.Instance
+        local current = hitInstance
+        while current and current ~= workspace do
+            local parentObj = current.Parent
+            if parentObj then
+                local pName = parentObj.Name:lower()
+                if pName:find("island") or pName:find("zone") or pName:find("map") or pName:find("area") or parentObj == workspace then
+                    if current:IsA("Model") or current:IsA("Folder") then
+                        if not Players:GetPlayerFromCharacter(current) and current.Name ~= "Terrain" and current.Name ~= "Workspace" then
+                            return current.Name
+                        end
+                    end
+                end
+            end
+            current = current.Parent
+        end
+    end
+
+    local islandsFolder = workspace:FindFirstChild("Islands") or workspace:FindFirstChild("Map") or workspace:FindFirstChild("Zones") or workspace:FindFirstChild("World")
+    if islandsFolder then
+        local closestName = nil
+        local minDist = math.huge
+        for _, child in ipairs(islandsFolder:GetChildren()) do
+            local pos = nil
+            if child:IsA("Model") then
+                pos = child.PrimaryPart and child.PrimaryPart.Position or child:GetPivot().Position
+            elseif child:IsA("BasePart") then
+                pos = child.Position
+            end
+
+            if pos then
+                local dist = (hrp.Position - pos).Magnitude
+                if dist < minDist then
+                    minDist = dist
+                    closestName = child.Name
+                end
+            end
+        end
+        if closestName and minDist <= 1500 then
+            return closestName
+        end
+    end
+
+    return "Lautan Luas (Ocean)"
+end
+
+local function UpdatePlayerTracker()
+    local currentOnlineMap = {}
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        currentOnlineMap[p.UserId] = true
+        local currentLocation = GetPlayerLocation(p)
+        
+        if trackedPlayers[p.UserId] then
+            trackedPlayers[p.UserId].IsOnline = true
+            trackedPlayers[p.UserId].Location = currentLocation
+        else
+            trackedPlayers[p.UserId] = {
+                Name = p.Name,
+                DisplayName = p.DisplayName,
+                IsOnline = true,
+                Location = currentLocation
+            }
+        end
+    end
+
+    for userId, data in pairs(trackedPlayers) do
+        if not currentOnlineMap[userId] then
+            data.IsOnline = false
+        end
+    end
+end
+
+local function SendPlayerList(isManual)
+    local url = ConfigData.WebhookURL
+    if not url or url == "" or not string.find(url, "discord") then
+        if UIStatus_PlayerMon then
+            UIStatus_PlayerMon.Text = "Status: Link Webhook Kosong/Salah!"
+            UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+        return
+    end
+
+    if isManual and UIStatus_PlayerMon then
+        UIStatus_PlayerMon.Text = "Status: Mengirim Test Manual..."
+        UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 200, 50)
+    end
+
+    UpdatePlayerTracker()
+
+    local onlineCount = 0
+    local totalTracked = 0
+    local sortedList = {}
+
+    for userId, data in pairs(trackedPlayers) do
+        table.insert(sortedList, data)
+    end
+
+    table.sort(sortedList, function(a, b)
+        if a.IsOnline ~= b.IsOnline then return a.IsOnline end
+        return a.DisplayName:lower() < b.DisplayName:lower()
+    end)
+
+    local playerLines = {}
+    for i, data in ipairs(sortedList) do
+        totalTracked = totalTracked + 1
+        if data.IsOnline then onlineCount = onlineCount + 1 end
+
+        local icon = data.IsOnline and "🟢" or "🔴"
+        local locInfo = data.IsOnline and ("📍 " .. data.Location) or ("👻 Last Location: " .. data.Location)
+        
+        table.insert(playerLines, string.format("%s %d. %s (@%s) | %s", icon, i, data.DisplayName, data.Name, locInfo))
+    end
+
+    local maxPlayer = Players.MaxPlayers
+    local disconnectedCount = totalTracked - onlineCount
+    local listText = table.concat(playerLines, "\n")
+
+    if #listText > 1800 then
+        listText = string.sub(listText, 1, 1800) .. "\n... (Daftar dipotong)"
+    end
+
+    local wibTime = os.time() + (7 * 3600)
+    local tanggalWIB = os.date("!%d/%m/%y", wibTime) 
+    local jamWIB = os.date("!%H:%M:%S", wibTime)     
+
+    local payload = {
+        username = "Server Player Monitor",
+        embeds = {
+            {
+                title = isManual and "🛠️ [MANUAL TEST] Server Player Tracker" or "🌐 Server Player Tracker",
+                color = (disconnectedCount > 0) and 15158332 or 3066993,
+                fields = {
+                    {
+                        name = "🕒 Waktu Pengiriman (WIB)",
+                        value = string.format("📅 **Tanggal:** %s\n⏰ **Jam:** %s WIB", tanggalWIB, jamWIB),
+                        inline = false
+                    },
+                    {
+                        name = "📊 Ringkasan Populasi",
+                        value = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d\n📌 **Total Terdeteksi:** %d", 
+                            onlineCount, maxPlayer, disconnectedCount, totalTracked),
+                        inline = false
+                    },
+                    {
+                        name = "👤 Daftar Player & Lokasi Map",
+                        value = totalTracked > 0 and ("```\n" .. listText .. "\n```") or "```\nTidak ada player\n```",
+                        inline = false
+                    }
+                },
+                timestamp = DateTime.now():ToIsoDate()
+            }
+        }
+    }
+
+    local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+    if requestFunc then
+        pcall(function()
+            requestFunc({
                 Url = url,
                 Method = "POST",
                 Headers = {["Content-Type"] = "application/json"},
                 Body = HttpService:JSONEncode(payload)
             })
+        end)
+        if UIStatus_PlayerMon then
+            local statusTeks = isManual and "Test Manual Terkirim (" or "Terkirim ("
+            UIStatus_PlayerMon.Text = "Status: " .. statusTeks .. os.date("%H:%M:%S") .. ")"
+            UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
         end
-    end)
-end
-
-local function SendStatusWebhook()
-    if ConfigData.WebhookStatusURL == "" then return end
-    local map = GetCurrentMapName()
-    PostWebhook(ConfigData.WebhookStatusURL, {
-        username = "Shadow Hub Status Reporter",
-        content = string.format("```\n👤 USERNAME : %s\n🟢 STATUS   : ONLINE & ACTIVE\n🗺️ MAP/PULAU : %s\n```", player.Name, map)
-    })
-end
-
-local function SendInventoryWebhook(counts)
-    if ConfigData.WebhookInventoryURL == "" then return end
-    PostWebhook(ConfigData.WebhookInventoryURL, {
-        username = "Shadow Hub Inventory Tracker",
-        content = string.format("```\n🎒 INVENTORI BERTAMBAH! [%s]\n--------------------------------\n🗿 Runic Enchant Stone   : %d\n⚡ Evolved Enchant Stone : %d\n🐟 Forgotten Fish        : %d\n✨ Secret Fish           : %d\n```", 
-            player.Name, counts.Runic, counts.Evolved, counts.Forgotten, counts.Secret)
-    })
-end
-
-local function SendCatchLogWebhook(msg)
-    if ConfigData.WebhookCatchURL == "" then return end
-    PostWebhook(ConfigData.WebhookCatchURL, {
-        username = "Shadow Catch Logger",
-        content = string.format("```\n📢 [CATCH / CHAT LOG EVENT]\n👤 Player : %s\n📍 Lokasi : %s\n💬 Text   : %s\n```", player.Name, GetCurrentMapName(), msg)
-    })
+    else
+        if UIStatus_PlayerMon then
+            UIStatus_PlayerMon.Text = "Status: Executor Tidak Support Request"
+            UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+    end
 end
 
 -- ========================================================
--- 5. UI SYSTEM (SHADOW PANEL V8)
+-- 4. UI SYSTEM (SHADOW PANEL V8)
 -- ========================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Shadow_Panel_V8"
-local targetGui = (gethui and gethui()) or game:GetService("CoreGui") or player.PlayerGui
-ScreenGui.Parent = targetGui
+ScreenGui.Parent = (gethui and gethui()) or game:GetService("CoreGui") or player.PlayerGui
 
 local c_bg = Color3.fromRGB(15, 15, 18)
 local c_sidebar = Color3.fromRGB(20, 20, 24)
@@ -303,19 +347,20 @@ local c_accent = Color3.fromRGB(140, 60, 255)
 local c_text = Color3.fromRGB(240, 240, 240)
 local c_subtext = Color3.fromRGB(170, 170, 170)
 
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 560, 0, 350)
+MainFrame.Position = UDim2.new(0.5, -280, 0.5, -175)
+MainFrame.BackgroundColor3 = c_bg
+MainFrame.Active = true; MainFrame.Draggable = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(40, 40, 50); MainFrame.UIStroke.Thickness = 1
+
 local LogoBtn = Instance.new("TextButton", ScreenGui)
 LogoBtn.Size = UDim2.new(0, 45, 0, 45); LogoBtn.Position = UDim2.new(0, 15, 0.35, 0)
 LogoBtn.BackgroundColor3 = c_sidebar; LogoBtn.Text = "S"; LogoBtn.TextColor3 = c_accent
 LogoBtn.Font = Enum.Font.GothamBlack; LogoBtn.TextSize = 22; LogoBtn.Active = true; LogoBtn.Draggable = true
+LogoBtn.Visible = false
 Instance.new("UICorner", LogoBtn).CornerRadius = UDim.new(0, 10)
-Instance.new("UIStroke", LogoBtn).Color = c_accent; LogoBtn.UIStroke.Thickness = 2
-
-local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 540, 0, 340); MainFrame.Position = UDim2.new(0.5, -270, 0.5, -170)
-MainFrame.BackgroundColor3 = c_bg; MainFrame.Active = true; MainFrame.Draggable = true
-MainFrame.Visible = false; MainFrame.ClipsDescendants = true
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
-Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(40, 40, 50); MainFrame.UIStroke.Thickness = 1
 
 local Header = Instance.new("Frame", MainFrame)
 Header.Size = UDim2.new(1, 0, 0, 40); Header.BackgroundTransparency = 1
@@ -326,21 +371,6 @@ TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW HUB V8"
 TitleLabel.TextColor3 = c_accent; TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.TextSize = 13
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local DiscordBtn = Instance.new("TextButton", Header)
-DiscordBtn.Size = UDim2.new(0, 130, 0, 24); DiscordBtn.Position = UDim2.new(1, -180, 0.5, -12)
-DiscordBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 32); DiscordBtn.Text = "discord.gg/shadow"
-DiscordBtn.TextColor3 = Color3.fromRGB(180, 180, 190); DiscordBtn.Font = Enum.Font.GothamSemibold; DiscordBtn.TextSize = 10
-Instance.new("UICorner", DiscordBtn).CornerRadius = UDim.new(0, 6)
-
-DiscordBtn.MouseButton1Click:Connect(function()
-    if setclipboard then
-        setclipboard("https://discord.gg/u7fSg6JGn")
-        DiscordBtn.Text = "COPIED LINK!"; DiscordBtn.TextColor3 = c_accent
-        task.wait(1.5)
-        DiscordBtn.Text = "discord.gg/shadow"; DiscordBtn.TextColor3 = Color3.fromRGB(180, 180, 190)
-    end
-end)
-
 local CloseBtn = Instance.new("TextButton", Header)
 CloseBtn.Size = UDim2.new(0, 40, 0, 40); CloseBtn.Position = UDim2.new(1, -40, 0, 0)
 CloseBtn.BackgroundTransparency = 1; CloseBtn.Text = "—"; CloseBtn.TextColor3 = c_accent
@@ -349,23 +379,46 @@ CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.TextSize = 16
 LogoBtn.MouseButton1Click:Connect(function() MainFrame.Visible = true; LogoBtn.Visible = false end)
 CloseBtn.MouseButton1Click:Connect(function() MainFrame.Visible = false; LogoBtn.Visible = true end)
 
--- SIDEBAR SYSTEM
+local ResizeHandle = Instance.new("TextButton", MainFrame)
+ResizeHandle.Size = UDim2.new(0, 20, 0, 20); ResizeHandle.Position = UDim2.new(1, -20, 1, -20)
+ResizeHandle.BackgroundTransparency = 1; ResizeHandle.Text = "◢"; ResizeHandle.TextColor3 = c_subtext
+ResizeHandle.TextSize = 14; ResizeHandle.Font = Enum.Font.GothamBold
+
+local isDraggingResize = false
+local dragStartPos, startSize
+
+ResizeHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDraggingResize = true; dragStartPos = input.Position; startSize = MainFrame.Size
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then isDraggingResize = false end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if isDraggingResize and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStartPos
+        local newWidth = math.clamp(startSize.X.Offset + delta.X, 400, 900)
+        local newHeight = math.clamp(startSize.Y.Offset + delta.Y, 250, 600)
+        MainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
+    end
+end)
+
 local Sidebar = Instance.new("Frame", MainFrame)
-Sidebar.Size = UDim2.new(0, 150, 1, -40); Sidebar.Position = UDim2.new(0, 0, 0, 40)
+Sidebar.Size = UDim2.new(0, 160, 1, -40); Sidebar.Position = UDim2.new(0, 0, 0, 40)
 Sidebar.BackgroundColor3 = c_sidebar; Sidebar.BorderSizePixel = 0
 Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 10)
 local SidebarList = Instance.new("UIListLayout", Sidebar)
 SidebarList.Padding = UDim.new(0, 4); SidebarList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
 local Pages = {}
-
 local function CreateTab(name, active)
     local btn = Instance.new("TextButton", Sidebar)
     btn.Size = UDim2.new(0.92, 0, 0, 34); btn.BackgroundColor3 = active and Color3.fromRGB(35, 35, 45) or c_sidebar
     btn.Text = "  " .. name; btn.TextColor3 = active and c_text or c_subtext
     btn.Font = Enum.Font.GothamSemibold; btn.TextSize = 10; btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.AutoButtonColor = false; btn.BorderSizePixel = 0
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    btn.AutoButtonColor = false; Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
     
     local indicator = Instance.new("Frame", btn)
     indicator.Size = UDim2.new(0, 3, 0.6, 0); indicator.Position = UDim2.new(0, 2, 0.2, 0)
@@ -373,19 +426,17 @@ local function CreateTab(name, active)
     Instance.new("UICorner", indicator).CornerRadius = UDim.new(1, 0)
 
     local PageScroll = Instance.new("ScrollingFrame", MainFrame)
-    PageScroll.Size = UDim2.new(1, -160, 1, -50); PageScroll.Position = UDim2.new(0, 160, 0, 40)
+    PageScroll.Size = UDim2.new(1, -170, 1, -50); PageScroll.Position = UDim2.new(0, 170, 0, 40)
     PageScroll.BackgroundTransparency = 1; PageScroll.BorderSizePixel = 0
     PageScroll.ScrollBarThickness = 3; PageScroll.ScrollBarImageColor3 = c_accent; PageScroll.Visible = active
     local Layout = Instance.new("UIListLayout", PageScroll)
     Layout.Padding = UDim.new(0, 8); Layout.SortOrder = Enum.SortOrder.LayoutOrder
 
     Pages[name] = {Button = btn, Indicator = indicator, Frame = PageScroll}
-
     btn.MouseButton1Click:Connect(function()
         for pName, pData in pairs(Pages) do
             local isTarget = (pName == name)
-            pData.Frame.Visible = isTarget
-            pData.Indicator.Visible = isTarget
+            pData.Frame.Visible = isTarget; pData.Indicator.Visible = isTarget
             pData.Button.BackgroundColor3 = isTarget and Color3.fromRGB(35, 35, 45) or c_sidebar
             pData.Button.TextColor3 = isTarget and c_text or c_subtext
         end
@@ -393,13 +444,11 @@ local function CreateTab(name, active)
     return PageScroll
 end
 
--- CREATING SIDEBAR TABS
 local TabAutomation = CreateTab("⚡ Automation", true)
 local TabBooster    = CreateTab("🚀 Booster & RAM", false)
 local TabWebhooks   = CreateTab("📡 Discord Webhooks", false)
 local TabConfig     = CreateTab("⚙️ Config Manager", false)
 
--- UI BUILDERS
 local function CreateDropdown(parent, titleText)
     local DropdownFrame = Instance.new("Frame", parent)
     DropdownFrame.Size = UDim2.new(1, -10, 0, 38); DropdownFrame.BackgroundColor3 = c_content
@@ -411,10 +460,6 @@ local function CreateDropdown(parent, titleText)
     TopBtn.Text = "   " .. titleText; TopBtn.TextColor3 = c_text; TopBtn.Font = Enum.Font.GothamBold; TopBtn.TextSize = 11
     TopBtn.TextXAlignment = Enum.TextXAlignment.Left
     
-    local Arrow = Instance.new("TextLabel", TopBtn)
-    Arrow.Size = UDim2.new(0, 40, 1, 0); Arrow.Position = UDim2.new(1, -40, 0, 0)
-    Arrow.BackgroundTransparency = 1; Arrow.Text = "▼"; Arrow.TextColor3 = c_accent; Arrow.Font = Enum.Font.GothamBold; Arrow.TextSize = 11
-    
     local ItemsContainer = Instance.new("Frame", DropdownFrame)
     ItemsContainer.Size = UDim2.new(1, 0, 0, 0); ItemsContainer.Position = UDim2.new(0, 0, 0, 38)
     ItemsContainer.BackgroundTransparency = 1; ItemsContainer.AutomaticSize = Enum.AutomaticSize.Y
@@ -422,13 +467,10 @@ local function CreateDropdown(parent, titleText)
     ItemLayout.Padding = UDim.new(0, 6); ItemLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     Instance.new("UIPadding", ItemsContainer).PaddingBottom = UDim.new(0, 8)
 
-    local isOpen = false
+    local isOpen = true
     TopBtn.MouseButton1Click:Connect(function()
-        isOpen = not isOpen
-        Arrow.Rotation = isOpen and 180 or 0
-        ItemsContainer.Visible = isOpen
+        isOpen = not isOpen; ItemsContainer.Visible = isOpen
     end)
-    ItemsContainer.Visible = false
     return ItemsContainer
 end
 
@@ -454,16 +496,21 @@ local function CreateToggle(parent, text, configKey, callback)
     Instance.new("UICorner", Circle).CornerRadius = UDim.new(1, 0)
     
     local state = ConfigData[configKey] or false
-    ToggleBtn.MouseButton1Click:Connect(function()
-        state = not state
-        ConfigData[configKey] = state
-        SaveConfig()
-        
+
+    UI_Updaters[configKey] = function(newState)
+        state = newState
         local targetColor = state and c_accent or Color3.fromRGB(60, 60, 70)
         local targetPos = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
         TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
         TweenService:Create(Circle, TweenInfo.new(0.2), {Position = targetPos}):Play()
         if callback then callback(state) end
+    end
+
+    ToggleBtn.MouseButton1Click:Connect(function()
+        state = not state
+        ConfigData[configKey] = state
+        SaveConfig()
+        UI_Updaters[configKey](state)
     end)
     if state and callback then callback(state) end
 end
@@ -490,6 +537,8 @@ local function CreateTextBox(parent, placeholder, configKey, callback)
     Box.PlaceholderColor3 = c_subtext; Box.Font = Enum.Font.GothamSemibold; Box.TextSize = 10
     Box.TextXAlignment = Enum.TextXAlignment.Left; Box.ClearTextOnFocus = false
     
+    UI_Updaters[configKey] = function(newState) Box.Text = tostring(newState) end
+
     Box.FocusLost:Connect(function()
         ConfigData[configKey] = Box.Text
         SaveConfig()
@@ -508,10 +557,10 @@ local function CreateStatusLabel(parent)
 end
 
 -- ========================================================
--- 6. MENU SETUP (AUTOMATION, BOOSTER, DISCORD, CONFIG)
+-- 5. MENU SETUP
 -- ========================================================
 
--- TAB AUTOMATION
+-- TAB AUTOMATION (UPDATE: EVENT ELEMENTAL & AUTO ROTATE DARI MENTAHAN DONE)
 local DropElemental = CreateDropdown(TabAutomation, "Event Elemental TP")
 local UIStatus_Elemental = CreateStatusLabel(DropElemental)
 
@@ -535,169 +584,86 @@ CreateToggle(DropRotate, "Enable Auto Rotate (1 Jam)", "AutoRotate", function(st
     end
 end)
 
--- TAB BOOSTER
+-- TAB BOOSTER & RAM (TIDAK DISENTUH/DIRUSAK)
 local DropBooster = CreateDropdown(TabBooster, "Graphic & Performance Booster")
+CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state) end)
+CreateToggle(DropBooster, "Disable 3D Rendering", "Disable3D", function(state)
+    RunService:Set3dRenderingEnabled(not state)
+end)
+CreateToggle(DropBooster, "Clear Water (Hilangkan Air)", "ClearWater", function(state) end)
+CreateToggle(DropBooster, "Limit 30 FPS", "Limit30FPS", function(state) 
+    if setfpscap then setfpscap(state and 30 or 60) end
+end)
+CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state) end)
 
-local function nukeVisuals(obj)
-    if player.Character and (obj == player.Character or obj:IsDescendantOf(player.Character)) then return end
-    pcall(function()
-        if obj:IsA("BasePart") then
-            obj.Material = Enum.Material.SmoothPlastic
-            obj.Reflectance = 0; obj.CastShadow = false
-            if obj:IsA("MeshPart") then obj.TextureID = "" end
-        elseif obj:IsA("SurfaceAppearance") or obj:IsA("Texture") or obj:IsA("Decal") then
-            obj:Destroy()
-        elseif obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("ParticleEmitter") then
-            obj:Destroy()
-        end
-    end)
-end
+-- TAB DISCORD WEBHOOKS (UPDATE: TRACKER MOVED HERE)
+local DropGlobalWeb = CreateDropdown(TabWebhooks, "🔗 Global Webhook Configuration")
+CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL", function(txt) end)
 
-CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state)
-    if state then
-        pcall(function()
-            if setfpscap then setfpscap(60) end
-            if sethiddenproperty then sethiddenproperty(Lighting, "Technology", 2) end
-            settings().Rendering.QualityLevel = 1
-            Lighting.GlobalShadows = false
-            MaterialService.Use2022Materials = false
-        end)
-        for _, mat in pairs(Enum.Material:GetEnumItems()) do
-            pcall(function()
-                local variant = Instance.new("MaterialVariant")
-                variant.Name = "Nuke_" .. mat.Name
-                variant.BaseMaterial = mat; variant.ColorMap = ""; variant.Parent = MaterialService
-                MaterialService:SetMaterialOverride(mat, variant.Name)
-            end)
-        end
-        for _, obj in pairs(workspace:GetDescendants()) do nukeVisuals(obj) end
-        for _, obj in pairs(Lighting:GetDescendants()) do nukeVisuals(obj) end
-        workspace.DescendantAdded:Connect(nukeVisuals)
-        Lighting.DescendantAdded:Connect(nukeVisuals)
+local DropWebToggles = CreateDropdown(TabWebhooks, "⚙️ Active Webhook Features")
+UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles) -- TRACKER STATUS DIPINDAHKAN KESINI
+
+local trackerInterval = 1500
+local trackerRemaining = 0
+local isTrackerActive = false
+
+CreateToggle(DropWebToggles, "Enable Player Tracker", "WebhookPlayer", function(state)
+    isTrackerActive = state
+    if not state then
+        UIStatus_PlayerMon.Text = "TRACKER : DISABLED"
+        UIStatus_PlayerMon.TextColor3 = c_subtext
+        trackerRemaining = 0
+    else
+        trackerRemaining = trackerInterval
     end
 end)
 
-CreateToggle(DropBooster, "Disable 3D Rendering (GPU Saver)", "Disable3D", function(state)
-    RunService:Set3dRenderingEnabled(not state)
-end)
-
-CreateToggle(DropBooster, "Clear Water & Fog Effects", "ClearWater", function(state)
-    pcall(function()
-        local terrain = workspace:FindFirstChildOfClass("Terrain")
-        if terrain then
-            terrain.WaterWaveSize = state and 0 or 0.15
-            terrain.WaterWaveSpeed = state and 0 or 10
-            terrain.WaterReflectance = state and 0 or 1
-            terrain.WaterTransparency = state and 1 or 0.8
-        end
-        Lighting.FogEnd = state and 9e9 or 1000
-    end)
-end)
-
-CreateToggle(DropBooster, "Limit 30 FPS (Cold AFK)", "Limit30FPS", function(state)
-    if setfpscap then setfpscap(state and 30 or 60) end
-end)
-
-CreateToggle(DropBooster, "Auto RAM Cleaner (60s)", "AutoRAM", function(state) end)
-
--- TAB DISCORD WEBHOOKS
-local DropStatusWeb = CreateDropdown(TabWebhooks, "👤 Status & Map Webhook (20m)")
-CreateTextBox(DropStatusWeb, "Paste Webhook URL Status...", "WebhookStatusURL", function(txt) end)
-CreateButton(DropStatusWeb, "Send Test Status Report", function() SendStatusWebhook() end)
-
-local DropInvWeb = CreateDropdown(TabWebhooks, "🎒 Inventory Tracker Webhook")
-CreateTextBox(DropInvWeb, "Paste Webhook URL Inventory...", "WebhookInventoryURL", function(txt) end)
-CreateButton(DropInvWeb, "Send Test Inventory Report", function()
-    local c = GetDetailedItemCounts()
-    SendInventoryWebhook(c)
-end)
-
-local DropCatchWeb = CreateDropdown(TabWebhooks, "📢 Catch & Chat Log Webhook")
-CreateTextBox(DropCatchWeb, "Paste Webhook URL Chat Catch...", "WebhookCatchURL", function(txt) end)
-CreateButton(DropCatchWeb, "Send Test Catch Log", function()
-    SendCatchLogWebhook("[TEST] Berhasil menangkap Secret Fish / Stone!")
+local DropWebTest = CreateDropdown(TabWebhooks, "🧪 Test Webhook Triggers")
+CreateButton(DropWebTest, "🚀 Kirim Test Player Tracker Manual", function()
+    SendPlayerList(true)
 end)
 
 -- TAB CONFIG MANAGER
 local DropConfigSystem = CreateDropdown(TabConfig, "Configuration Manager")
 CreateButton(DropConfigSystem, "💾 Save UI Settings Manual", function() SaveConfig() end)
-CreateButton(DropConfigSystem, "🔄 Load UI Settings Manual", function() LoadConfig() end)
-CreateButton(DropConfigSystem, "⚠️ Reset Settingan (Auto Rejoin)", function()
+
+local BtnReset = CreateButton(DropConfigSystem, "⚠️ Reset Settingan (Tanpa DC)", function() end)
+BtnReset.MouseButton1Click:Connect(function()
     ResetConfig()
+    BtnReset.Text = "✅ Reset Berhasil! UI Diperbarui."
+    BtnReset.TextColor3 = Color3.fromRGB(100, 255, 100)
+    task.wait(2)
+    BtnReset.Text = "⚠️ Reset Settingan (Tanpa DC)"
+    BtnReset.TextColor3 = c_text
 end)
 
 -- ==========================================================
--- 7. THREADS & BACKGROUND ENGINES
+-- 6. BACKGROUND ENGINES & THREADS
 -- ==========================================================
 
--- 1. THREAD STATUS KARAKTER & MAP (SETIAP 20 MENIT)
+-- TRACKER THREAD
 task.spawn(function()
     while true do
-        SendStatusWebhook()
-        task.wait(1200)
-    end
-end)
-
--- 2. THREAD SMART INVENTORY TRACKER (KIRIM HANYA JIKA JUMLAH BERTAMBAH)
-task.spawn(function()
-    local lastCounts = { Runic = -1, Evolved = -1, Forgotten = -1, Secret = -1 }
-    while true do
-        task.wait(5)
-        if ConfigData.WebhookInventoryURL ~= "" then
-            local current = GetDetailedItemCounts()
-            
-            if lastCounts.Runic ~= -1 then
-                if current.Runic > lastCounts.Runic or current.Evolved > lastCounts.Evolved or 
-                   current.Forgotten > lastCounts.Forgotten or current.Secret > lastCounts.Secret then
-                    
-                    SendInventoryWebhook(current)
-                    lastCounts.Runic = current.Runic
-                    lastCounts.Evolved = current.Evolved
-                    lastCounts.Forgotten = current.Forgotten
-                    lastCounts.Secret = current.Secret
-                end
+        task.wait(1)
+        if isTrackerActive then
+            if trackerRemaining <= 0 then
+                UIStatus_PlayerMon.Text = "TRACKER : MENGIRIM DATA..."
+                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
+                SendPlayerList(false)
+                trackerRemaining = trackerInterval
+                task.wait(2) 
             else
-                lastCounts.Runic = current.Runic
-                lastCounts.Evolved = current.Evolved
-                lastCounts.Forgotten = current.Forgotten
-                lastCounts.Secret = current.Secret
+                trackerRemaining = trackerRemaining - 1
+                local menit = math.floor(trackerRemaining / 60)
+                local detik = trackerRemaining % 60
+                UIStatus_PlayerMon.Text = string.format("TRACKER AKTIF : NEXT SEND %02d:%02d", menit, detik)
+                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(50, 255, 100)
             end
         end
     end
 end)
 
--- 3. CHAT LOG & CATCH DETECTOR ENGINE (REALTIME)
-task.spawn(function()
-    pcall(function()
-        local TextChatService = game:GetService("TextChatService")
-        TextChatService.OnIncomingChatMessage = function(message)
-            if message and message.Text then
-                local txt = message.Text
-                local lowerTxt = string.lower(txt)
-                if string.find(lowerTxt, "secret") or string.find(lowerTxt, "enchant stone") or string.find(lowerTxt, "forgotten") then
-                    SendCatchLogWebhook(txt)
-                end
-            end
-        end
-    end)
-
-    pcall(function()
-        local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-        if chatEvents and chatEvents:FindFirstChild("OnMessageDoneFiltering") then
-            chatEvents.OnMessageDoneFiltering.OnClientEvent:Connect(function(data)
-                if data and data.Message then
-                    local txt = tostring(data.Message)
-                    local lowerTxt = string.lower(txt)
-                    if string.find(lowerTxt, "secret") or string.find(lowerTxt, "enchant stone") or string.find(lowerTxt, "forgotten") then
-                        SendCatchLogWebhook(txt)
-                    end
-                end
-            end)
-        end
-    end)
-end)
-
--- ANTI-AFK ENGINE
+-- ANTI AFK
 player.Idled:Connect(function()
     if ConfigData.AntiAFK then
         VirtualUser:CaptureController()
@@ -705,7 +671,7 @@ player.Idled:Connect(function()
     end
 end)
 
--- AUTO RAM CLEANER
+-- RAM CLEANER
 task.spawn(function()
     while true do
         task.wait(60)
@@ -713,7 +679,7 @@ task.spawn(function()
     end
 end)
 
--- LOOP AUTO TP ELEMENTAL
+-- LOOP AUTO TP ELEMENTAL (DARI MENTAHAN DONE)
 task.spawn(function()
     while true do
         task.wait(1)
@@ -763,7 +729,7 @@ task.spawn(function()
     end
 end)
 
--- LOOP AUTO ROTATE 1 JAM
+-- LOOP AUTO ROTATE 1 JAM (DARI MENTAHAN DONE)
 task.spawn(function()
     while true do
         if ConfigData.AutoRotate then
