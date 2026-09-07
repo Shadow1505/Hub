@@ -27,7 +27,9 @@ local DefaultConfig = {
     AutoRAM = false,
     AntiAFK = true,
     WebhookURL = "",
-    WebhookPlayer = false
+    WebhookPlayer = false,
+    UISizeX = 520,
+    UISizeY = 320
 }
 
 local ConfigData = {}
@@ -135,66 +137,71 @@ local function PulangKeSetPos()
 end
 
 -- ========================================================
--- 3. ENGINE WEBHOOK & PLAYER TRACKER (UPDATE: DONE WEEBHOOK)
+-- 3. ENGINE WEBHOOK & PLAYER TRACKER (AKURASI MAP DIPERBARUI)
 -- ========================================================
 local trackedPlayers = {}
-local UIStatus_PlayerMon -- Dideklarasikan untuk diakses Global
+local UIStatus_PlayerMon
+local trackerUIPaused = false
 
 local function GetPlayerLocation(targetPlayer)
     local char = targetPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     
-    if not hrp then 
-        return "Loading/Mati" 
+    if not hrp then return "Loading/Mati" end
+
+    local closestName = nil
+    local minDist = math.huge
+
+    -- 1. Metode Utama: Deteksi Koordinat Horizontal (Kebal Map Bawah Tanah)
+    local mapFolders = {"Zones", "Islands", "Map", "World", "Locations"}
+    for _, folderName in ipairs(mapFolders) do
+        local folder = workspace:FindFirstChild(folderName)
+        if folder then
+            for _, child in ipairs(folder:GetChildren()) do
+                local pos = nil
+                if child:IsA("Model") then
+                    pos = child:GetPivot().Position
+                elseif child:IsA("BasePart") then
+                    pos = child.Position
+                end
+
+                if pos then
+                    -- Mengabaikan sumbu Y agar Crystalline Passage tidak membajak Ancient Ruin
+                    local dist = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude
+                    if dist < minDist then 
+                        minDist = dist 
+                        closestName = child.Name 
+                    end
+                end
+            end
+        end
     end
 
+    if closestName and minDist <= 3500 then 
+        return closestName 
+    end
+
+    -- 2. Fallback: Raycast Klasik
     local raycastParams = RaycastParams.new()
     raycastParams.FilterDescendantsInstances = {char}
     raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 
-    local rayResult = workspace:Raycast(hrp.Position, Vector3.new(0, -500, 0), raycastParams)
-    
+    local rayResult = workspace:Raycast(hrp.Position, Vector3.new(0, -1000, 0), raycastParams)
     if rayResult and rayResult.Instance then
-        local hitInstance = rayResult.Instance
-        local current = hitInstance
+        local current = rayResult.Instance
+        local blacklist = {["!!! DEPENDENCIES"] = true, ["Terrain"] = true, ["Workspace"] = true, ["Water"] = true, ["Baseplate"] = true}
+        
         while current and current ~= workspace do
             local parentObj = current.Parent
             if parentObj then
                 local pName = parentObj.Name:lower()
-                if pName:find("island") or pName:find("zone") or pName:find("map") or pName:find("area") or parentObj == workspace then
-                    if current:IsA("Model") or current:IsA("Folder") then
-                        if not Players:GetPlayerFromCharacter(current) and current.Name ~= "Terrain" and current.Name ~= "Workspace" then
-                            return current.Name
-                        end
+                if pName == "workspace" or pName:find("islands") or pName:find("zones") or pName:find("map") or pName:find("world") then
+                    if (current:IsA("Model") or current:IsA("Folder")) and not Players:GetPlayerFromCharacter(current) and not blacklist[current.Name] then
+                        return current.Name
                     end
                 end
             end
             current = current.Parent
-        end
-    end
-
-    local islandsFolder = workspace:FindFirstChild("Islands") or workspace:FindFirstChild("Map") or workspace:FindFirstChild("Zones") or workspace:FindFirstChild("World")
-    if islandsFolder then
-        local closestName = nil
-        local minDist = math.huge
-        for _, child in ipairs(islandsFolder:GetChildren()) do
-            local pos = nil
-            if child:IsA("Model") then
-                pos = child.PrimaryPart and child.PrimaryPart.Position or child:GetPivot().Position
-            elseif child:IsA("BasePart") then
-                pos = child.Position
-            end
-
-            if pos then
-                local dist = (hrp.Position - pos).Magnitude
-                if dist < minDist then
-                    minDist = dist
-                    closestName = child.Name
-                end
-            end
-        end
-        if closestName and minDist <= 1500 then
-            return closestName
         end
     end
 
@@ -203,28 +210,17 @@ end
 
 local function UpdatePlayerTracker()
     local currentOnlineMap = {}
-
     for _, p in ipairs(Players:GetPlayers()) do
         currentOnlineMap[p.UserId] = true
         local currentLocation = GetPlayerLocation(p)
-        
         if trackedPlayers[p.UserId] then
-            trackedPlayers[p.UserId].IsOnline = true
-            trackedPlayers[p.UserId].Location = currentLocation
+            trackedPlayers[p.UserId].IsOnline = true; trackedPlayers[p.UserId].Location = currentLocation
         else
-            trackedPlayers[p.UserId] = {
-                Name = p.Name,
-                DisplayName = p.DisplayName,
-                IsOnline = true,
-                Location = currentLocation
-            }
+            trackedPlayers[p.UserId] = {Name = p.Name, DisplayName = p.DisplayName, IsOnline = true, Location = currentLocation}
         end
     end
-
     for userId, data in pairs(trackedPlayers) do
-        if not currentOnlineMap[userId] then
-            data.IsOnline = false
-        end
+        if not currentOnlineMap[userId] then data.IsOnline = false end
     end
 end
 
@@ -232,27 +228,26 @@ local function SendPlayerList(isManual)
     local url = ConfigData.WebhookURL
     if not url or url == "" or not string.find(url, "discord") then
         if UIStatus_PlayerMon then
-            UIStatus_PlayerMon.Text = "Status: Link Webhook Kosong/Salah!"
-            UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
+            task.spawn(function()
+                trackerUIPaused = true
+                UIStatus_PlayerMon.Text = "Status: Link Webhook Kosong/Salah!"
+                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
+                task.wait(3)
+                trackerUIPaused = false
+            end)
         end
         return
     end
 
     if isManual and UIStatus_PlayerMon then
-        UIStatus_PlayerMon.Text = "Status: Mengirim Test Manual..."
+        UIStatus_PlayerMon.Text = "Status: Mengumpulkan Data..."
         UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 200, 50)
     end
 
     UpdatePlayerTracker()
 
-    local onlineCount = 0
-    local totalTracked = 0
-    local sortedList = {}
-
-    for userId, data in pairs(trackedPlayers) do
-        table.insert(sortedList, data)
-    end
-
+    local onlineCount = 0; local totalTracked = 0; local sortedList = {}
+    for userId, data in pairs(trackedPlayers) do table.insert(sortedList, data) end
     table.sort(sortedList, function(a, b)
         if a.IsOnline ~= b.IsOnline then return a.IsOnline end
         return a.DisplayName:lower() < b.DisplayName:lower()
@@ -262,73 +257,59 @@ local function SendPlayerList(isManual)
     for i, data in ipairs(sortedList) do
         totalTracked = totalTracked + 1
         if data.IsOnline then onlineCount = onlineCount + 1 end
-
         local icon = data.IsOnline and "🟢" or "🔴"
         local locInfo = data.IsOnline and ("📍 " .. data.Location) or ("👻 Last Location: " .. data.Location)
-        
         table.insert(playerLines, string.format("%s %d. %s (@%s) | %s", icon, i, data.DisplayName, data.Name, locInfo))
     end
 
-    local maxPlayer = Players.MaxPlayers
-    local disconnectedCount = totalTracked - onlineCount
+    local maxPlayer = Players.MaxPlayers; local disconnectedCount = totalTracked - onlineCount
     local listText = table.concat(playerLines, "\n")
-
-    if #listText > 1800 then
-        listText = string.sub(listText, 1, 1800) .. "\n... (Daftar dipotong)"
-    end
+    if #listText > 1800 then listText = string.sub(listText, 1, 1800) .. "\n... (Daftar dipotong)" end
 
     local wibTime = os.time() + (7 * 3600)
-    local tanggalWIB = os.date("!%d/%m/%y", wibTime) 
-    local jamWIB = os.date("!%H:%M:%S", wibTime)     
+    local tanggalWIB = os.date("!%d/%m/%y", wibTime); local jamWIB = os.date("!%H:%M:%S", wibTime)     
 
     local payload = {
         username = "Server Player Monitor",
-        embeds = {
-            {
-                title = isManual and "🛠️ [MANUAL TEST] Server Player Tracker" or "🌐 Server Player Tracker",
-                color = (disconnectedCount > 0) and 15158332 or 3066993,
-                fields = {
-                    {
-                        name = "🕒 Waktu Pengiriman (WIB)",
-                        value = string.format("📅 **Tanggal:** %s\n⏰ **Jam:** %s WIB", tanggalWIB, jamWIB),
-                        inline = false
-                    },
-                    {
-                        name = "📊 Ringkasan Populasi",
-                        value = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d\n📌 **Total Terdeteksi:** %d", 
-                            onlineCount, maxPlayer, disconnectedCount, totalTracked),
-                        inline = false
-                    },
-                    {
-                        name = "👤 Daftar Player & Lokasi Map",
-                        value = totalTracked > 0 and ("```\n" .. listText .. "\n```") or "```\nTidak ada player\n```",
-                        inline = false
-                    }
-                },
-                timestamp = DateTime.now():ToIsoDate()
-            }
-        }
+        embeds = {{
+            title = isManual and "🛠️ [MANUAL TEST] Server Player Tracker" or "🌐 Server Player Tracker",
+            color = (disconnectedCount > 0) and 15158332 or 3066993,
+            fields = {
+                {name = "🕒 Waktu Pengiriman (WIB)", value = string.format("📅 **Tanggal:** %s\n⏰ **Jam:** %s WIB", tanggalWIB, jamWIB), inline = false},
+                {name = "📊 Ringkasan Populasi", value = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d\n📌 **Total Terdeteksi:** %d", onlineCount, maxPlayer, disconnectedCount, totalTracked), inline = false},
+                {name = "👤 Daftar Player & Lokasi Map", value = totalTracked > 0 and ("```\n" .. listText .. "\n```") or "```\nTidak ada player\n```", inline = false}
+            },
+            timestamp = DateTime.now():ToIsoDate()
+        }}
     }
 
     local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if requestFunc then
-        pcall(function()
-            requestFunc({
-                Url = url,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = HttpService:JSONEncode(payload)
-            })
+        task.spawn(function()
+            pcall(function()
+                requestFunc({Url = url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(payload)})
+            end)
         end)
+        
         if UIStatus_PlayerMon then
-            local statusTeks = isManual and "Test Manual Terkirim (" or "Terkirim ("
-            UIStatus_PlayerMon.Text = "Status: " .. statusTeks .. os.date("%H:%M:%S") .. ")"
-            UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
+            task.spawn(function()
+                trackerUIPaused = true
+                local statusTeks = isManual and "Test Manual Terkirim!" or "Auto Data Terkirim!"
+                UIStatus_PlayerMon.Text = "Status: " .. statusTeks
+                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
+                task.wait(3)
+                trackerUIPaused = false
+            end)
         end
     else
         if UIStatus_PlayerMon then
-            UIStatus_PlayerMon.Text = "Status: Executor Tidak Support Request"
-            UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
+            task.spawn(function()
+                trackerUIPaused = true
+                UIStatus_PlayerMon.Text = "Status: Executor Tidak Support!"
+                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
+                task.wait(3)
+                trackerUIPaused = false
+            end)
         end
     end
 end
@@ -340,18 +321,14 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Shadow_Panel_V8"
 ScreenGui.Parent = (gethui and gethui()) or game:GetService("CoreGui") or player.PlayerGui
 
-local c_bg = Color3.fromRGB(15, 15, 18)
-local c_sidebar = Color3.fromRGB(20, 20, 24)
-local c_content = Color3.fromRGB(25, 25, 30)
-local c_accent = Color3.fromRGB(140, 60, 255)
-local c_text = Color3.fromRGB(240, 240, 240)
-local c_subtext = Color3.fromRGB(170, 170, 170)
+local c_bg = Color3.fromRGB(15, 15, 18); local c_sidebar = Color3.fromRGB(20, 20, 24)
+local c_content = Color3.fromRGB(25, 25, 30); local c_accent = Color3.fromRGB(140, 60, 255)
+local c_text = Color3.fromRGB(240, 240, 240); local c_subtext = Color3.fromRGB(170, 170, 170)
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 560, 0, 350)
-MainFrame.Position = UDim2.new(0.5, -280, 0.5, -175)
-MainFrame.BackgroundColor3 = c_bg
-MainFrame.Active = true; MainFrame.Draggable = true
+MainFrame.Size = UDim2.new(0, ConfigData.UISizeX or 520, 0, ConfigData.UISizeY or 320)
+MainFrame.Position = UDim2.new(0.5, -(ConfigData.UISizeX or 520)/2, 0.5, -(ConfigData.UISizeY or 320)/2)
+MainFrame.BackgroundColor3 = c_bg; MainFrame.Active = true; MainFrame.Draggable = true
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(40, 40, 50); MainFrame.UIStroke.Thickness = 1
 
@@ -367,9 +344,8 @@ Header.Size = UDim2.new(1, 0, 0, 40); Header.BackgroundTransparency = 1
 
 local TitleLabel = Instance.new("TextLabel", Header)
 TitleLabel.Size = UDim2.new(0.4, 0, 1, 0); TitleLabel.Position = UDim2.new(0, 15, 0, 0)
-TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW HUB V8"
-TitleLabel.TextColor3 = c_accent; TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.TextSize = 13
-TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW HUB V8"; TitleLabel.TextColor3 = c_accent
+TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.TextSize = 13; TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local CloseBtn = Instance.new("TextButton", Header)
 CloseBtn.Size = UDim2.new(0, 40, 0, 40); CloseBtn.Position = UDim2.new(1, -40, 0, 0)
@@ -384,24 +360,27 @@ ResizeHandle.Size = UDim2.new(0, 20, 0, 20); ResizeHandle.Position = UDim2.new(1
 ResizeHandle.BackgroundTransparency = 1; ResizeHandle.Text = "◢"; ResizeHandle.TextColor3 = c_subtext
 ResizeHandle.TextSize = 14; ResizeHandle.Font = Enum.Font.GothamBold
 
-local isDraggingResize = false
-local dragStartPos, startSize
+local isDraggingResize = false; local dragStartPos, startSize
 
 ResizeHandle.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         isDraggingResize = true; dragStartPos = input.Position; startSize = MainFrame.Size
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then isDraggingResize = false end
-        end)
     end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
     if isDraggingResize and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         local delta = input.Position - dragStartPos
-        local newWidth = math.clamp(startSize.X.Offset + delta.X, 400, 900)
-        local newHeight = math.clamp(startSize.Y.Offset + delta.Y, 250, 600)
-        MainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
+        MainFrame.Size = UDim2.new(0, math.clamp(startSize.X.Offset + delta.X, 400, 900), 0, math.clamp(startSize.Y.Offset + delta.Y, 250, 600))
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if isDraggingResize and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+        isDraggingResize = false
+        ConfigData.UISizeX = MainFrame.Size.X.Offset
+        ConfigData.UISizeY = MainFrame.Size.Y.Offset
+        SaveConfig()
     end
 end)
 
@@ -417,8 +396,8 @@ local function CreateTab(name, active)
     local btn = Instance.new("TextButton", Sidebar)
     btn.Size = UDim2.new(0.92, 0, 0, 34); btn.BackgroundColor3 = active and Color3.fromRGB(35, 35, 45) or c_sidebar
     btn.Text = "  " .. name; btn.TextColor3 = active and c_text or c_subtext
-    btn.Font = Enum.Font.GothamSemibold; btn.TextSize = 10; btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.AutoButtonColor = false; Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    btn.Font = Enum.Font.GothamSemibold; btn.TextSize = 10; btn.TextXAlignment = Enum.TextXAlignment.Left; btn.AutoButtonColor = false
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
     
     local indicator = Instance.new("Frame", btn)
     indicator.Size = UDim2.new(0, 3, 0.6, 0); indicator.Position = UDim2.new(0, 2, 0.2, 0)
@@ -457,8 +436,7 @@ local function CreateDropdown(parent, titleText)
     
     local TopBtn = Instance.new("TextButton", DropdownFrame)
     TopBtn.Size = UDim2.new(1, 0, 0, 38); TopBtn.BackgroundTransparency = 1
-    TopBtn.Text = "   " .. titleText; TopBtn.TextColor3 = c_text; TopBtn.Font = Enum.Font.GothamBold; TopBtn.TextSize = 11
-    TopBtn.TextXAlignment = Enum.TextXAlignment.Left
+    TopBtn.Text = "   " .. titleText; TopBtn.TextColor3 = c_text; TopBtn.Font = Enum.Font.GothamBold; TopBtn.TextSize = 11; TopBtn.TextXAlignment = Enum.TextXAlignment.Left
     
     local ItemsContainer = Instance.new("Frame", DropdownFrame)
     ItemsContainer.Size = UDim2.new(1, 0, 0, 0); ItemsContainer.Position = UDim2.new(0, 0, 0, 38)
@@ -468,9 +446,7 @@ local function CreateDropdown(parent, titleText)
     Instance.new("UIPadding", ItemsContainer).PaddingBottom = UDim.new(0, 8)
 
     local isOpen = true
-    TopBtn.MouseButton1Click:Connect(function()
-        isOpen = not isOpen; ItemsContainer.Visible = isOpen
-    end)
+    TopBtn.MouseButton1Click:Connect(function() isOpen = not isOpen; ItemsContainer.Visible = isOpen end)
     return ItemsContainer
 end
 
@@ -490,8 +466,7 @@ local function CreateToggle(parent, text, configKey, callback)
     Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0)
     
     local Circle = Instance.new("Frame", ToggleBtn)
-    Circle.Size = UDim2.new(0, 14, 0, 14)
-    Circle.Position = ConfigData[configKey] and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+    Circle.Size = UDim2.new(0, 14, 0, 14); Circle.Position = ConfigData[configKey] and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
     Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     Instance.new("UICorner", Circle).CornerRadius = UDim.new(1, 0)
     
@@ -507,10 +482,7 @@ local function CreateToggle(parent, text, configKey, callback)
     end
 
     ToggleBtn.MouseButton1Click:Connect(function()
-        state = not state
-        ConfigData[configKey] = state
-        SaveConfig()
-        UI_Updaters[configKey](state)
+        state = not state; ConfigData[configKey] = state; SaveConfig(); UI_Updaters[configKey](state)
     end)
     if state and callback then callback(state) end
 end
@@ -534,16 +506,10 @@ local function CreateTextBox(parent, placeholder, configKey, callback)
     Box.Size = UDim2.new(1, -20, 1, 0); Box.Position = UDim2.new(0, 10, 0, 0)
     Box.BackgroundTransparency = 1; Box.PlaceholderText = placeholder
     Box.Text = tostring(ConfigData[configKey] or ""); Box.TextColor3 = c_text
-    Box.PlaceholderColor3 = c_subtext; Box.Font = Enum.Font.GothamSemibold; Box.TextSize = 10
-    Box.TextXAlignment = Enum.TextXAlignment.Left; Box.ClearTextOnFocus = false
+    Box.PlaceholderColor3 = c_subtext; Box.Font = Enum.Font.GothamSemibold; Box.TextSize = 10; Box.TextXAlignment = Enum.TextXAlignment.Left; Box.ClearTextOnFocus = false
     
     UI_Updaters[configKey] = function(newState) Box.Text = tostring(newState) end
-
-    Box.FocusLost:Connect(function()
-        ConfigData[configKey] = Box.Text
-        SaveConfig()
-        if callback then callback(Box.Text) end
-    end)
+    Box.FocusLost:Connect(function() ConfigData[configKey] = Box.Text; SaveConfig(); if callback then callback(Box.Text) end end)
 end
 
 local function CreateStatusLabel(parent)
@@ -559,8 +525,6 @@ end
 -- ========================================================
 -- 5. MENU SETUP
 -- ========================================================
-
--- TAB AUTOMATION (UPDATE: EVENT ELEMENTAL & AUTO ROTATE DARI MENTAHAN DONE)
 local DropElemental = CreateDropdown(TabAutomation, "Event Elemental TP")
 local UIStatus_Elemental = CreateStatusLabel(DropElemental)
 
@@ -569,39 +533,28 @@ CreateToggle(DropElemental, "Enable Auto TP Cuaca", "AutoTP", function(state)
     if state then
         if hrp and not posisiSimpanan then posisiSimpanan = hrp.CFrame end
     else
-        UIStatus_Elemental.Text = "SYSTEM PAUSED"
-        UIStatus_Elemental.TextColor3 = c_subtext
+        UIStatus_Elemental.Text = "SYSTEM PAUSED"; UIStatus_Elemental.TextColor3 = c_subtext
     end
 end)
 
 local DropRotate = CreateDropdown(TabAutomation, "Auto Rotate Fishing")
 local UIStatus_Rotate = CreateStatusLabel(DropRotate)
-
 CreateToggle(DropRotate, "Enable Auto Rotate (1 Jam)", "AutoRotate", function(state)
-    if not state then
-        UIStatus_Rotate.Text = "AUTO ROTATE: OFF"
-        UIStatus_Rotate.TextColor3 = c_subtext
-    end
+    if not state then UIStatus_Rotate.Text = "AUTO ROTATE: OFF"; UIStatus_Rotate.TextColor3 = c_subtext end
 end)
 
--- TAB BOOSTER & RAM (TIDAK DISENTUH/DIRUSAK)
 local DropBooster = CreateDropdown(TabBooster, "Graphic & Performance Booster")
 CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state) end)
-CreateToggle(DropBooster, "Disable 3D Rendering", "Disable3D", function(state)
-    RunService:Set3dRenderingEnabled(not state)
-end)
+CreateToggle(DropBooster, "Disable 3D Rendering", "Disable3D", function(state) RunService:Set3dRenderingEnabled(not state) end)
 CreateToggle(DropBooster, "Clear Water (Hilangkan Air)", "ClearWater", function(state) end)
-CreateToggle(DropBooster, "Limit 30 FPS", "Limit30FPS", function(state) 
-    if setfpscap then setfpscap(state and 30 or 60) end
-end)
+CreateToggle(DropBooster, "Limit 30 FPS", "Limit30FPS", function(state) if setfpscap then setfpscap(state and 30 or 60) end end)
 CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state) end)
 
--- TAB DISCORD WEBHOOKS (UPDATE: TRACKER MOVED HERE)
 local DropGlobalWeb = CreateDropdown(TabWebhooks, "🔗 Global Webhook Configuration")
 CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL", function(txt) end)
 
 local DropWebToggles = CreateDropdown(TabWebhooks, "⚙️ Active Webhook Features")
-UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles) -- TRACKER STATUS DIPINDAHKAN KESINI
+UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles)
 
 local trackerInterval = 1500
 local trackerRemaining = 0
@@ -610,76 +563,57 @@ local isTrackerActive = false
 CreateToggle(DropWebToggles, "Enable Player Tracker", "WebhookPlayer", function(state)
     isTrackerActive = state
     if not state then
-        UIStatus_PlayerMon.Text = "TRACKER : DISABLED"
-        UIStatus_PlayerMon.TextColor3 = c_subtext
         trackerRemaining = 0
+        task.spawn(function()
+            trackerUIPaused = true
+            UIStatus_PlayerMon.Text = "TRACKER : DISABLED"
+            UIStatus_PlayerMon.TextColor3 = c_subtext
+            task.wait(1)
+            trackerUIPaused = false
+        end)
     else
         trackerRemaining = trackerInterval
     end
 end)
 
 local DropWebTest = CreateDropdown(TabWebhooks, "🧪 Test Webhook Triggers")
-CreateButton(DropWebTest, "🚀 Kirim Test Player Tracker Manual", function()
-    SendPlayerList(true)
-end)
+CreateButton(DropWebTest, "🚀 Kirim Test Player Tracker Manual", function() SendPlayerList(true) end)
 
--- TAB CONFIG MANAGER
 local DropConfigSystem = CreateDropdown(TabConfig, "Configuration Manager")
 CreateButton(DropConfigSystem, "💾 Save UI Settings Manual", function() SaveConfig() end)
-
 local BtnReset = CreateButton(DropConfigSystem, "⚠️ Reset Settingan (Tanpa DC)", function() end)
 BtnReset.MouseButton1Click:Connect(function()
-    ResetConfig()
-    BtnReset.Text = "✅ Reset Berhasil! UI Diperbarui."
-    BtnReset.TextColor3 = Color3.fromRGB(100, 255, 100)
-    task.wait(2)
-    BtnReset.Text = "⚠️ Reset Settingan (Tanpa DC)"
-    BtnReset.TextColor3 = c_text
+    ResetConfig(); BtnReset.Text = "✅ Reset Berhasil! UI Diperbarui."; BtnReset.TextColor3 = Color3.fromRGB(100, 255, 100)
+    task.wait(2); BtnReset.Text = "⚠️ Reset Settingan (Tanpa DC)"; BtnReset.TextColor3 = c_text
 end)
 
 -- ==========================================================
 -- 6. BACKGROUND ENGINES & THREADS
 -- ==========================================================
-
--- TRACKER THREAD
 task.spawn(function()
     while true do
         task.wait(1)
         if isTrackerActive then
             if trackerRemaining <= 0 then
-                UIStatus_PlayerMon.Text = "TRACKER : MENGIRIM DATA..."
-                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
                 SendPlayerList(false)
                 trackerRemaining = trackerInterval
-                task.wait(2) 
             else
                 trackerRemaining = trackerRemaining - 1
-                local menit = math.floor(trackerRemaining / 60)
-                local detik = trackerRemaining % 60
-                UIStatus_PlayerMon.Text = string.format("TRACKER AKTIF : NEXT SEND %02d:%02d", menit, detik)
-                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(50, 255, 100)
+                if not trackerUIPaused and UIStatus_PlayerMon then
+                    local menit = math.floor(trackerRemaining / 60)
+                    local detik = trackerRemaining % 60
+                    UIStatus_PlayerMon.Text = string.format("TRACKER AKTIF : NEXT SEND %02d:%02d", menit, detik)
+                    UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(50, 255, 100)
+                end
             end
         end
     end
 end)
 
--- ANTI AFK
-player.Idled:Connect(function()
-    if ConfigData.AntiAFK then
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-    end
-end)
+player.Idled:Connect(function() if ConfigData.AntiAFK then VirtualUser:CaptureController(); VirtualUser:ClickButton2(Vector2.new()) end end)
 
--- RAM CLEANER
-task.spawn(function()
-    while true do
-        task.wait(60)
-        if ConfigData.AutoRAM then collectgarbage("collect") end
-    end
-end)
+task.spawn(function() while true do task.wait(60); if ConfigData.AutoRAM then collectgarbage("collect") end end end)
 
--- LOOP AUTO TP ELEMENTAL (DARI MENTAHAN DONE)
 task.spawn(function()
     while true do
         task.wait(1)
@@ -700,9 +634,7 @@ task.spawn(function()
             elseif schedule.state == "ACTIVE" then
                 UIStatus_Elemental.Text = "MENUJU PAPAN..."
                 UIStatus_Elemental.TextColor3 = Color3.fromRGB(100, 200, 255)
-                hrp.CFrame = spotKordinat.Board
-                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                task.wait(1.5)
+                hrp.CFrame = spotKordinat.Board; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); task.wait(1.5)
                 
                 local cuacaAktif = GetWeatherIconOnly()
                 if cuacaAktif then
@@ -720,45 +652,34 @@ task.spawn(function()
                         task.wait(1)
                     end
                 else
-                    UIStatus_Elemental.Text = "MENUNGGU ICON CUACA..."
-                    UIStatus_Elemental.TextColor3 = c_subtext
-                    task.wait(1)
+                    UIStatus_Elemental.Text = "MENUNGGU ICON CUACA..."; UIStatus_Elemental.TextColor3 = c_subtext; task.wait(1)
                 end
             end
         end
     end
 end)
 
--- LOOP AUTO ROTATE 1 JAM (DARI MENTAHAN DONE)
 task.spawn(function()
     while true do
         if ConfigData.AutoRotate then
-            local char = player.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            
+            local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local targetAngle = math.rad(poolAngles[currentPoolIndex])
                 local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
                 
                 for i = 1, 6 do
-                    if hrp and hrp.Parent then
-                        hrp.CFrame = targetCFrame
-                        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                        hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                    end
+                    if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
                     task.wait(0.05)
                 end
                 
-                currentPoolIndex = currentPoolIndex + 1
-                if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
+                currentPoolIndex = currentPoolIndex + 1; if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
                 
                 local elapsed = 0
                 while elapsed < rotateInterval and ConfigData.AutoRotate do
                     local sisaDetik = rotateInterval - elapsed
                     UIStatus_Rotate.Text = "NEXT ROTATE: " .. formatSecondsToText(sisaDetik)
                     UIStatus_Rotate.TextColor3 = Color3.fromRGB(50, 255, 100)
-                    task.wait(1)
-                    elapsed = elapsed + 1
+                    task.wait(1); elapsed = elapsed + 1
                 end
             else
                 task.wait(1)
