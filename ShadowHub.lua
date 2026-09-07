@@ -3,9 +3,14 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local MaterialService = game:GetService("MaterialService")
 local Lighting = game:GetService("Lighting")
-local player = Players.LocalPlayer
-local workspace = game:GetService("Workspace")
+local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
 
 -- ========================================================
 -- 1. DATA KOORDINAT & VARIABEL SISTEM
@@ -23,6 +28,7 @@ local DatabaseIconCuaca = {
     ["76632496002371"]  = "Volcano",
 }
 
+-- STATE CONTROL
 local autoTeleportAktif = false
 local posisiSimpanan = nil
 
@@ -30,17 +36,22 @@ local autoRotateAktif = false
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
 local currentPoolIndex = 1
-local rotateInterval = 3600 -- DIKEMBALIKAN KE 1 JAM (3600 Detik)
-local currentRotateCD = 0
+local rotateInterval = 3600
+
+local autoShakeAktif = false
+local autoSellAktif = false
+local autoRAMCleaner = false
+local antiAfKAktif = true
+
+local webhookURL = ""
 
 -- ========================================================
--- 2. ALGORITMA CORE
+-- 2. ALGORITMA CORE & OPTIMIZERS
 -- ========================================================
 local function GetEventScheduleWIB()
     local utc_time = os.time()
     local wib_time = utc_time + (7 * 3600)
     local date = os.date("!*t", wib_time)
-    
     local h = date.hour; local m = date.min; local s = date.sec
     
     if h % 3 == 1 then
@@ -49,10 +60,8 @@ local function GetEventScheduleWIB()
     else
         local nextHour = h + 1
         while nextHour % 3 ~= 1 do nextHour = nextHour + 1 end
-        
         local jamSisa = nextHour - h - 1; local menitSisa = 59 - m; local detikSisa = 60 - s
-        local sisaDetikCD = (jamSisa * 3600) + (menitSisa * 60) + detikSisa
-        return { state = "COOLDOWN", timeLeft = sisaDetikCD }
+        return { state = "COOLDOWN", timeLeft = (jamSisa * 3600) + (menitSisa * 60) + detikSisa }
     end
 end
 
@@ -77,9 +86,7 @@ local function GetWeatherIconOnly()
                             local img = (obj:IsA("Decal") or obj:IsA("Texture")) and tostring(obj.Texture) or tostring(obj.Image)
                             local pureId = string.match(img, "%d+")
                             local imgLower = string.lower(img)
-                            
-                            local isVisible = false
-                            if obj:IsA("ImageLabel") or obj:IsA("ImageButton") then isVisible = obj.Visible and (obj.ImageTransparency < 0.9) else isVisible = (obj.Transparency < 0.9) end
+                            local isVisible = (obj:IsA("ImageLabel") or obj:IsA("ImageButton")) and (obj.Visible and obj.ImageTransparency < 0.9) or (obj.Transparency < 0.9)
 
                             if isVisible and pureId and img ~= "" and not string.find(imgLower, "shadow") then
                                 if DatabaseIconCuaca[pureId] then return DatabaseIconCuaca[pureId] end
@@ -97,19 +104,47 @@ local function PulangKeSetPos()
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if hrp and posisiSimpanan then
         hrp.CFrame = posisiSimpanan
-        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     end
 end
 
+local function FireDirectAutoSell()
+    pcall(function()
+        local net = ReplicatedStorage:FindFirstChild("packages") and ReplicatedStorage.packages:FindFirstChild("Net")
+        if net and net:FindFirstChild("RE/Merchant/SellAll") then
+            net["RE/Merchant/SellAll"]:FireServer()
+        elseif ReplicatedStorage:FindFirstChild("events") and ReplicatedStorage.events:FindFirstChild("selleverything") then
+            ReplicatedStorage.events.selleverything:InvokeServer()
+        end
+    end)
+end
+
+local function SendDiscordWebhook(msg)
+    if webhookURL == "" then return end
+    pcall(function()
+        local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+        if req then
+            req({
+                Url = webhookURL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode({
+                    username = "Shadow Hub Tracker",
+                    content = "```" .. msg .. "```"
+                })
+            })
+        end
+    end)
+end
+
 -- ========================================================
--- 3. UI PANEL MEWAH (SHADOW V5)
+-- 3. UI SYSTEM & MODERN SIDEBAR
 -- ========================================================
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "Shadow_Panel_V5"
+ScreenGui.Name = "Shadow_Panel_V6"
 local targetGui = (gethui and gethui()) or game:GetService("CoreGui") or player.PlayerGui
 ScreenGui.Parent = targetGui
 
--- THEME COLORS
 local c_bg = Color3.fromRGB(15, 15, 18)
 local c_sidebar = Color3.fromRGB(20, 20, 24)
 local c_content = Color3.fromRGB(25, 25, 30)
@@ -117,49 +152,29 @@ local c_accent = Color3.fromRGB(140, 60, 255)
 local c_text = Color3.fromRGB(240, 240, 240)
 local c_subtext = Color3.fromRGB(170, 170, 170)
 
--- LOGO MINIMIZE (SISI KIRI)
-local LogoBtn = Instance.new("TextButton")
-LogoBtn.Size = UDim2.new(0, 45, 0, 45)
-LogoBtn.Position = UDim2.new(0, 15, 0.35, 0)
-LogoBtn.BackgroundColor3 = c_sidebar
-LogoBtn.Text = "S"
-LogoBtn.TextColor3 = c_accent
-LogoBtn.Font = Enum.Font.GothamBlack
-LogoBtn.TextSize = 22
-LogoBtn.Parent = ScreenGui
-LogoBtn.Active = true; LogoBtn.Draggable = true
+local LogoBtn = Instance.new("TextButton", ScreenGui)
+LogoBtn.Size = UDim2.new(0, 45, 0, 45); LogoBtn.Position = UDim2.new(0, 15, 0.35, 0)
+LogoBtn.BackgroundColor3 = c_sidebar; LogoBtn.Text = "S"; LogoBtn.TextColor3 = c_accent
+LogoBtn.Font = Enum.Font.GothamBlack; LogoBtn.TextSize = 22; LogoBtn.Active = true; LogoBtn.Draggable = true
 Instance.new("UICorner", LogoBtn).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", LogoBtn).Color = c_accent; LogoBtn.UIStroke.Thickness = 2
 
--- MAIN FRAME
-local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 520, 0, 320)
-MainFrame.Position = UDim2.new(0.5, -260, 0.5, -160)
-MainFrame.BackgroundColor3 = c_bg
-MainFrame.Active = true; MainFrame.Draggable = true
-MainFrame.Visible = false
-MainFrame.ClipsDescendants = true
-MainFrame.Parent = ScreenGui
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 540, 0, 330); MainFrame.Position = UDim2.new(0.5, -270, 0.5, -165)
+MainFrame.BackgroundColor3 = c_bg; MainFrame.Active = true; MainFrame.Draggable = true
+MainFrame.Visible = false; MainFrame.ClipsDescendants = true
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(40, 40, 50); MainFrame.UIStroke.Thickness = 1
 
--- RESIZE HANDLE
 local ResizeGrip = Instance.new("TextButton", MainFrame)
-ResizeGrip.Size = UDim2.new(0, 18, 0, 18)
-ResizeGrip.Position = UDim2.new(1, -18, 1, -18)
-ResizeGrip.BackgroundTransparency = 1
-ResizeGrip.Text = "◢"; ResizeGrip.TextColor3 = c_subtext
-ResizeGrip.Font = Enum.Font.GothamBold; ResizeGrip.TextSize = 12
-ResizeGrip.ZIndex = 10
+ResizeGrip.Size = UDim2.new(0, 18, 0, 18); ResizeGrip.Position = UDim2.new(1, -18, 1, -18)
+ResizeGrip.BackgroundTransparency = 1; ResizeGrip.Text = "◢"; ResizeGrip.TextColor3 = c_subtext
+ResizeGrip.Font = Enum.Font.GothamBold; ResizeGrip.TextSize = 12; ResizeGrip.ZIndex = 10
 
-local isResizing = false
-local dragStartPos, startSize
-
+local isResizing, dragStartPos, startSize
 ResizeGrip.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        isResizing = true
-        dragStartPos = input.Position
-        startSize = MainFrame.Size
+        isResizing = true; dragStartPos = input.Position; startSize = MainFrame.Size
         input.Changed:Connect(function()
             if input.UserInputState == Enum.UserInputState.End then isResizing = false end
         end)
@@ -169,81 +184,72 @@ end)
 UserInputService.InputChanged:Connect(function(input)
     if isResizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         local delta = input.Position - dragStartPos
-        MainFrame.Size = UDim2.new(0, math.max(400, startSize.X.Offset + delta.X), 0, math.max(220, startSize.Y.Offset + delta.Y))
+        MainFrame.Size = UDim2.new(0, math.max(420, startSize.X.Offset + delta.X), 0, math.max(240, startSize.Y.Offset + delta.Y))
     end
 end)
 
--- HEADER
 local Header = Instance.new("Frame", MainFrame)
 Header.Size = UDim2.new(1, 0, 0, 40); Header.BackgroundTransparency = 1
+
 local TitleLabel = Instance.new("TextLabel", Header)
 TitleLabel.Size = UDim2.new(0.4, 0, 1, 0); TitleLabel.Position = UDim2.new(0, 15, 0, 0)
-TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW PREMIUM"
+TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW HUB V6"
 TitleLabel.TextColor3 = c_accent; TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.TextSize = 13
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
--- DISCORD BUTTON (DI HEADER SEPERTI LYNX)
 local DiscordBtn = Instance.new("TextButton", Header)
-DiscordBtn.Size = UDim2.new(0, 130, 0, 24)
-DiscordBtn.Position = UDim2.new(1, -180, 0.5, -12)
-DiscordBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
-DiscordBtn.Text = "discord.gg/shadow"
-DiscordBtn.TextColor3 = Color3.fromRGB(180, 180, 190)
-DiscordBtn.Font = Enum.Font.GothamSemibold
-DiscordBtn.TextSize = 10
+DiscordBtn.Size = UDim2.new(0, 130, 0, 24); DiscordBtn.Position = UDim2.new(1, -180, 0.5, -12)
+DiscordBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 32); DiscordBtn.Text = "discord.gg/shadow"
+DiscordBtn.TextColor3 = Color3.fromRGB(180, 180, 190); DiscordBtn.Font = Enum.Font.GothamSemibold; DiscordBtn.TextSize = 10
 Instance.new("UICorner", DiscordBtn).CornerRadius = UDim.new(0, 6)
 Instance.new("UIStroke", DiscordBtn).Color = Color3.fromRGB(50, 50, 65)
 
 DiscordBtn.MouseButton1Click:Connect(function()
     if setclipboard then
         setclipboard("https://discord.gg/u7fSg6JGn")
-        DiscordBtn.Text = "COPIED LINK!"
-        DiscordBtn.TextColor3 = c_accent
+        DiscordBtn.Text = "COPIED LINK!"; DiscordBtn.TextColor3 = c_accent
         task.wait(1.5)
-        DiscordBtn.Text = "discord.gg/shadow"
-        DiscordBtn.TextColor3 = Color3.fromRGB(180, 180, 190)
+        DiscordBtn.Text = "discord.gg/shadow"; DiscordBtn.TextColor3 = Color3.fromRGB(180, 180, 190)
     end
 end)
 
 local CloseBtn = Instance.new("TextButton", Header)
 CloseBtn.Size = UDim2.new(0, 40, 0, 40); CloseBtn.Position = UDim2.new(1, -40, 0, 0)
-CloseBtn.BackgroundTransparency = 1; CloseBtn.Text = "—"
-CloseBtn.TextColor3 = c_accent; CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.TextSize = 16
+CloseBtn.BackgroundTransparency = 1; CloseBtn.Text = "—"; CloseBtn.TextColor3 = c_accent
+CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.TextSize = 16
 
 LogoBtn.MouseButton1Click:Connect(function() MainFrame.Visible = true; LogoBtn.Visible = false end)
 CloseBtn.MouseButton1Click:Connect(function() MainFrame.Visible = false; LogoBtn.Visible = true end)
 
--- SIDEBAR & NAVIGATION SYSTEM
+-- SIDEBAR SYSTEM
 local Sidebar = Instance.new("Frame", MainFrame)
-Sidebar.Size = UDim2.new(0, 130, 1, -40); Sidebar.Position = UDim2.new(0, 0, 0, 40)
+Sidebar.Size = UDim2.new(0, 140, 1, -40); Sidebar.Position = UDim2.new(0, 0, 0, 40)
 Sidebar.BackgroundColor3 = c_sidebar; Sidebar.BorderSizePixel = 0
 Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 10)
 local SidebarList = Instance.new("UIListLayout", Sidebar)
-SidebarList.Padding = UDim.new(0, 5); SidebarList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+SidebarList.Padding = UDim.new(0, 4); SidebarList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
 local Pages = {}
 
 local function CreateTab(name, active)
     local btn = Instance.new("TextButton", Sidebar)
-    btn.Size = UDim2.new(0.9, 0, 0, 35); btn.BackgroundColor3 = active and Color3.fromRGB(35, 35, 45) or c_sidebar
+    btn.Size = UDim2.new(0.92, 0, 0, 34); btn.BackgroundColor3 = active and Color3.fromRGB(35, 35, 45) or c_sidebar
     btn.Text = "  " .. name; btn.TextColor3 = active and c_text or c_subtext
-    btn.Font = Enum.Font.GothamSemibold; btn.TextSize = 12; btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Font = Enum.Font.GothamSemibold; btn.TextSize = 11; btn.TextXAlignment = Enum.TextXAlignment.Left
     btn.AutoButtonColor = false; btn.BorderSizePixel = 0
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
     
     local indicator = Instance.new("Frame", btn)
     indicator.Size = UDim2.new(0, 3, 0.6, 0); indicator.Position = UDim2.new(0, 2, 0.2, 0)
-    indicator.BackgroundColor3 = c_accent; indicator.BorderSizePixel = 0
-    indicator.Visible = active
+    indicator.BackgroundColor3 = c_accent; indicator.BorderSizePixel = 0; indicator.Visible = active
     Instance.new("UICorner", indicator).CornerRadius = UDim.new(1, 0)
 
     local PageScroll = Instance.new("ScrollingFrame", MainFrame)
-    PageScroll.Size = UDim2.new(1, -140, 1, -50); PageScroll.Position = UDim2.new(0, 140, 0, 40)
+    PageScroll.Size = UDim2.new(1, -150, 1, -50); PageScroll.Position = UDim2.new(0, 150, 0, 40)
     PageScroll.BackgroundTransparency = 1; PageScroll.BorderSizePixel = 0
-    PageScroll.ScrollBarThickness = 4; PageScroll.ScrollBarImageColor3 = c_accent
-    PageScroll.Visible = active
+    PageScroll.ScrollBarThickness = 3; PageScroll.ScrollBarImageColor3 = c_accent; PageScroll.Visible = active
     local Layout = Instance.new("UIListLayout", PageScroll)
-    Layout.Padding = UDim.new(0, 10); Layout.SortOrder = Enum.SortOrder.LayoutOrder
+    Layout.Padding = UDim.new(0, 8); Layout.SortOrder = Enum.SortOrder.LayoutOrder
 
     Pages[name] = {Button = btn, Indicator = indicator, Frame = PageScroll}
 
@@ -256,36 +262,37 @@ local function CreateTab(name, active)
             pData.Button.TextColor3 = isTarget and c_text or c_subtext
         end
     end)
-
     return PageScroll
 end
 
-local AutomationPage = CreateTab("Automation", true)
-local BoosterPage = CreateTab("Booster", false)
+-- PAGE CREATION
+local TabAutomation = CreateTab("⚡ Automation", true)
+local TabFishing    = CreateTab("🎣 Fishing Core", false)
+local TabBooster    = CreateTab("🚀 Booster & RAM", false)
+local TabUtility    = CreateTab("🛡️ Utility", false)
 
 -- UI BUILDER HELPERS
 local function CreateDropdown(parent, titleText)
     local DropdownFrame = Instance.new("Frame", parent)
-    DropdownFrame.Size = UDim2.new(1, -10, 0, 40); DropdownFrame.BackgroundColor3 = c_content
+    DropdownFrame.Size = UDim2.new(1, -10, 0, 38); DropdownFrame.BackgroundColor3 = c_content
     DropdownFrame.ClipsDescendants = true; DropdownFrame.AutomaticSize = Enum.AutomaticSize.Y
     Instance.new("UICorner", DropdownFrame).CornerRadius = UDim.new(0, 8)
     
     local TopBtn = Instance.new("TextButton", DropdownFrame)
-    TopBtn.Size = UDim2.new(1, 0, 0, 40); TopBtn.BackgroundTransparency = 1
-    TopBtn.Text = "   " .. titleText; TopBtn.TextColor3 = c_text; TopBtn.Font = Enum.Font.GothamBold; TopBtn.TextSize = 12
+    TopBtn.Size = UDim2.new(1, 0, 0, 38); TopBtn.BackgroundTransparency = 1
+    TopBtn.Text = "   " .. titleText; TopBtn.TextColor3 = c_text; TopBtn.Font = Enum.Font.GothamBold; TopBtn.TextSize = 11
     TopBtn.TextXAlignment = Enum.TextXAlignment.Left
     
     local Arrow = Instance.new("TextLabel", TopBtn)
     Arrow.Size = UDim2.new(0, 40, 1, 0); Arrow.Position = UDim2.new(1, -40, 0, 0)
-    Arrow.BackgroundTransparency = 1; Arrow.Text = "▼"; Arrow.TextColor3 = c_accent; Arrow.Font = Enum.Font.GothamBold; Arrow.TextSize = 12
+    Arrow.BackgroundTransparency = 1; Arrow.Text = "▼"; Arrow.TextColor3 = c_accent; Arrow.Font = Enum.Font.GothamBold; Arrow.TextSize = 11
     
     local ItemsContainer = Instance.new("Frame", DropdownFrame)
-    ItemsContainer.Size = UDim2.new(1, 0, 0, 0); ItemsContainer.Position = UDim2.new(0, 0, 0, 40)
+    ItemsContainer.Size = UDim2.new(1, 0, 0, 0); ItemsContainer.Position = UDim2.new(0, 0, 0, 38)
     ItemsContainer.BackgroundTransparency = 1; ItemsContainer.AutomaticSize = Enum.AutomaticSize.Y
     local ItemLayout = Instance.new("UIListLayout", ItemsContainer)
-    ItemLayout.Padding = UDim.new(0, 8); ItemLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    
-    Instance.new("UIPadding", ItemsContainer).PaddingBottom = UDim.new(0, 10)
+    ItemLayout.Padding = UDim.new(0, 6); ItemLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    Instance.new("UIPadding", ItemsContainer).PaddingBottom = UDim.new(0, 8)
 
     local isOpen = false
     TopBtn.MouseButton1Click:Connect(function()
@@ -294,27 +301,26 @@ local function CreateDropdown(parent, titleText)
         ItemsContainer.Visible = isOpen
     end)
     ItemsContainer.Visible = false
-    
     return ItemsContainer
 end
 
 local function CreateToggle(parent, text, callback)
     local Frame = Instance.new("Frame", parent)
-    Frame.Size = UDim2.new(0.95, 0, 0, 35); Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    Frame.Size = UDim2.new(0.95, 0, 0, 32); Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
     Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 6)
     
     local Label = Instance.new("TextLabel", Frame)
     Label.Size = UDim2.new(0.65, 0, 1, 0); Label.Position = UDim2.new(0, 10, 0, 0)
     Label.BackgroundTransparency = 1; Label.Text = text; Label.TextColor3 = c_text
-    Label.Font = Enum.Font.GothamSemibold; Label.TextSize = 11; Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Font = Enum.Font.GothamSemibold; Label.TextSize = 10; Label.TextXAlignment = Enum.TextXAlignment.Left
     
     local ToggleBtn = Instance.new("TextButton", Frame)
-    ToggleBtn.Size = UDim2.new(0, 40, 0, 20); ToggleBtn.Position = UDim2.new(1, -50, 0.5, -10)
+    ToggleBtn.Size = UDim2.new(0, 36, 0, 18); ToggleBtn.Position = UDim2.new(1, -45, 0.5, -9)
     ToggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70); ToggleBtn.Text = ""
     Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0)
     
     local Circle = Instance.new("Frame", ToggleBtn)
-    Circle.Size = UDim2.new(0, 16, 0, 16); Circle.Position = UDim2.new(0, 2, 0.5, -8)
+    Circle.Size = UDim2.new(0, 14, 0, 14); Circle.Position = UDim2.new(0, 2, 0.5, -7)
     Circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     Instance.new("UICorner", Circle).CornerRadius = UDim.new(1, 0)
     
@@ -322,7 +328,7 @@ local function CreateToggle(parent, text, callback)
     ToggleBtn.MouseButton1Click:Connect(function()
         state = not state
         local targetColor = state and c_accent or Color3.fromRGB(60, 60, 70)
-        local targetPos = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+        local targetPos = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
         TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
         TweenService:Create(Circle, TweenInfo.new(0.2), {Position = targetPos}):Play()
         callback(state)
@@ -331,17 +337,31 @@ end
 
 local function CreateButton(parent, text, callback)
     local Btn = Instance.new("TextButton", parent)
-    Btn.Size = UDim2.new(0.95, 0, 0, 35); Btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-    Btn.Text = text; Btn.TextColor3 = c_text; Btn.Font = Enum.Font.GothamSemibold; Btn.TextSize = 11
+    Btn.Size = UDim2.new(0.95, 0, 0, 32); Btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    Btn.Text = text; Btn.TextColor3 = c_text; Btn.Font = Enum.Font.GothamSemibold; Btn.TextSize = 10
     Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 6)
     Instance.new("UIStroke", Btn).Color = Color3.fromRGB(50, 50, 60); Btn.UIStroke.Thickness = 1
     Btn.MouseButton1Click:Connect(callback)
     return Btn
 end
 
+local function CreateTextBox(parent, placeholder, callback)
+    local BoxFrame = Instance.new("Frame", parent)
+    BoxFrame.Size = UDim2.new(0.95, 0, 0, 32); BoxFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    Instance.new("UICorner", BoxFrame).CornerRadius = UDim.new(0, 6)
+    
+    local Box = Instance.new("TextBox", BoxFrame)
+    Box.Size = UDim2.new(1, -20, 1, 0); Box.Position = UDim2.new(0, 10, 0, 0)
+    Box.BackgroundTransparency = 1; Box.PlaceholderText = placeholder; Box.Text = ""
+    Box.TextColor3 = c_text; Box.PlaceholderColor3 = c_subtext; Box.Font = Enum.Font.GothamSemibold; Box.TextSize = 10
+    Box.TextXAlignment = Enum.TextXAlignment.Left; Box.ClearTextOnFocus = false
+    
+    Box.FocusLost:Connect(function() callback(Box.Text) end)
+end
+
 local function CreateStatusLabel(parent)
     local Label = Instance.new("TextLabel", parent)
-    Label.Size = UDim2.new(0.95, 0, 0, 30); Label.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    Label.Size = UDim2.new(0.95, 0, 0, 28); Label.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     Label.Text = "Status: IDLE"; Label.TextColor3 = c_subtext
     Label.Font = Enum.Font.GothamBold; Label.TextSize = 10
     Instance.new("UICorner", Label).CornerRadius = UDim.new(0, 6)
@@ -350,64 +370,59 @@ local function CreateStatusLabel(parent)
 end
 
 -- ========================================================
--- 4. TAB AUTOMATION
+-- 4. PENGISIAN MENU DI TIGA TAB UTAMA
 -- ========================================================
 
--- DROPDOWN 1: EVENT ELEMENTAL TP
-local ElementalContainer = CreateDropdown(AutomationPage, "Event Elemental TP")
-local UILabels_Status = CreateStatusLabel(ElementalContainer)
+-- TAB 1: AUTOMATION
+local DropElemental = CreateDropdown(TabAutomation, "Event Elemental TP")
+local UIStatus_Elemental = CreateStatusLabel(DropElemental)
 
-CreateToggle(ElementalContainer, "Enable Auto TP Cuaca", function(state)
+CreateToggle(DropElemental, "Enable Auto TP Cuaca", function(state)
     autoTeleportAktif = state
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if state then
         if hrp and not posisiSimpanan then posisiSimpanan = hrp.CFrame end
     else
-        UILabels_Status.Text = "SYSTEM PAUSED"
-        UILabels_Status.TextColor3 = c_subtext
+        UIStatus_Elemental.Text = "SYSTEM PAUSED"
+        UIStatus_Elemental.TextColor3 = c_subtext
     end
 end)
 
-CreateButton(ElementalContainer, "Set Save Position", function()
-    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if hrp then posisiSimpanan = hrp.CFrame end
-end)
-CreateButton(ElementalContainer, "Force Return", function() PulangKeSetPos() end)
+local DropRotate = CreateDropdown(TabAutomation, "Auto Rotate Fishing")
+local UIStatus_Rotate = CreateStatusLabel(DropRotate)
 
--- DROPDOWN 2: AUTO ROTATE FISHING
-local RotateContainer = CreateDropdown(AutomationPage, "Auto Rotate Fishing")
-local UILabels_RotateStatus = CreateStatusLabel(RotateContainer)
-
-CreateToggle(RotateContainer, "Enable Auto Rotate (1 Jam)", function(state)
+CreateToggle(DropRotate, "Enable Auto Rotate (1 Jam)", function(state)
     autoRotateAktif = state
     if not state then
-        UILabels_RotateStatus.Text = "AUTO ROTATE: OFF"
-        UILabels_RotateStatus.TextColor3 = c_subtext
+        UIStatus_Rotate.Text = "AUTO ROTATE: OFF"
+        UIStatus_Rotate.TextColor3 = c_subtext
     end
 end)
 
-CreateButton(RotateContainer, "Teleport to Rotate Spot", function()
-    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        hrp.CFrame = CFrame.new(standPositionRot)
-        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-    end
+-- TAB 2: FISHING CORE
+local DropMechanics = CreateDropdown(TabFishing, "Core Fishing Mechanics")
+
+CreateToggle(DropMechanics, "Instant Shake Bypass", function(state)
+    autoShakeAktif = state
 end)
 
--- ========================================================
--- 5. TAB BOOSTER (FUNGSI BARU & SARAN PERFORMA)
--- ========================================================
+CreateToggle(DropMechanics, "Direct Remote Auto Sell", function(state)
+    autoSellAktif = state
+end)
 
-local BoosterContainer = CreateDropdown(BoosterPage, "Performance & Graphics Booster")
+CreateButton(DropMechanics, "Sell All Now (Instant)", function()
+    FireDirectAutoSell()
+end)
 
--- A. FPS Booster Bawaan Anda
+-- TAB 3: BOOSTER & RAM
+local DropBooster = CreateDropdown(TabBooster, "Graphic & Performance Booster")
+
 local function nukeVisuals(obj)
     if player.Character and (obj == player.Character or obj:IsDescendantOf(player.Character)) then return end
     pcall(function()
         if obj:IsA("BasePart") then
             obj.Material = Enum.Material.SmoothPlastic
-            obj.Reflectance = 0
-            obj.CastShadow = false
+            obj.Reflectance = 0; obj.CastShadow = false
             if obj:IsA("MeshPart") then obj.TextureID = "" end
         elseif obj:IsA("SurfaceAppearance") or obj:IsA("Texture") or obj:IsA("Decal") then
             obj:Destroy()
@@ -417,7 +432,7 @@ local function nukeVisuals(obj)
     end)
 end
 
-CreateToggle(BoosterContainer, "FPS Booster (Nuke Visuals)", function(state)
+CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", function(state)
     if state then
         pcall(function()
             if setfpscap then setfpscap(60) end
@@ -443,13 +458,11 @@ CreateToggle(BoosterContainer, "FPS Booster (Nuke Visuals)", function(state)
     end
 end)
 
--- B. SARAN BOOSTER 1: Disable 3D Rendering (Black Screen GPU Saver - Sangat Hemat Baterai/GPU)
-CreateToggle(BoosterContainer, "Disable 3D Rendering (GPU Saver)", function(state)
+CreateToggle(DropBooster, "Disable 3D Rendering (GPU Saver)", function(state)
     RunService:Set3dRenderingEnabled(not state)
 end)
 
--- C. SARAN BOOSTER 2: Clear Water & Fog Effects (Hapus Efek Gelombang Air)
-CreateToggle(BoosterContainer, "Clear Water & Fog Effects", function(state)
+CreateToggle(DropBooster, "Clear Water & Fog Effects", function(state)
     pcall(function()
         local terrain = workspace:FindFirstChildOfClass("Terrain")
         if terrain then
@@ -462,14 +475,93 @@ CreateToggle(BoosterContainer, "Clear Water & Fog Effects", function(state)
     end)
 end)
 
--- D. SARAN BOOSTER 3: Limit 30 FPS Cap (Untuk AFK Lebih Dingin)
-CreateToggle(BoosterContainer, "Limit 30 FPS (Cold AFK)", function(state)
+CreateToggle(DropBooster, "Limit 30 FPS (Cold AFK)", function(state)
     if setfpscap then setfpscap(state and 30 or 60) end
 end)
 
--- ========================================================
--- 6. LOGIKA BACKGROUND
--- ========================================================
+CreateToggle(DropBooster, "Auto RAM Cleaner (60s)", function(state)
+    autoRAMCleaner = state
+end)
+
+-- TAB 4: UTILITY & WEBHOOK
+local DropUtility = CreateDropdown(TabUtility, "System & Protection")
+
+CreateToggle(DropUtility, "Engine Anti-AFK (VirtualUser)", function(state)
+    antiAfKAktif = state
+end)
+
+CreateButton(DropUtility, "Set Save Position", function()
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then posisiSimpanan = hrp.CFrame end
+end)
+
+CreateButton(DropUtility, "Force Return Position", function() PulangKeSetPos() end)
+
+local DropWebhook = CreateDropdown(TabUtility, "Discord Webhook Tracker")
+
+CreateTextBox(DropWebhook, "Paste Discord Webhook URL...", function(txt)
+    webhookURL = txt
+end)
+
+CreateButton(DropWebhook, "Send Manual Test Report", function()
+    local leaderstats = player:FindFirstChild("leaderstats")
+    local cVal = leaderstats and leaderstats:FindFirstChild("C$") and leaderstats["C$"].Value or "N/A"
+    SendDiscordWebhook("👤 User: " .. player.Name .. "\n💰 Balance: C$ " .. tostring(cVal) .. "\n🟢 Status: ONLINE & ACTIVE")
+end)
+
+-- ==========================================================
+-- 5. ASYNCHRONOUS BACKGROUND THREADS (OPTIMIZED LOW-CPU)
+-- ==========================================================
+
+-- Anti-AFK Signal Hook
+player.Idled:Connect(function()
+    if antiAfKAktif then
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end
+end)
+
+-- Auto RAM Memory Cleaner Loop
+task.spawn(function()
+    while true do
+        task.wait(60)
+        if autoRAMCleaner then
+            collectgarbage("collect")
+        end
+    end
+end)
+
+-- Auto Shake Bypass Engine
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if autoShakeAktif then
+            pcall(function()
+                local pGui = player:FindFirstChild("PlayerGui")
+                local shakeUI = pGui and pGui:FindFirstChild("shakeui")
+                if shakeUI and shakeUI:FindFirstChild("safezone") then
+                    local btn = shakeUI.safezone:FindFirstChild("button")
+                    if btn and btn.Visible then
+                        local px = btn.AbsolutePosition.X + (btn.AbsoluteSize.X / 2)
+                        local py = btn.AbsolutePosition.Y + (btn.AbsoluteSize.Y / 2)
+                        VirtualInputManager:SendMouseButtonEvent(px, py, 0, true, game, 0)
+                        VirtualInputManager:SendMouseButtonEvent(px, py, 0, false, game, 0)
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- Auto Sell Interval Loop (Every 2 Minutes)
+task.spawn(function()
+    while true do
+        task.wait(120)
+        if autoSellAktif then
+            FireDirectAutoSell()
+        end
+    end
+end)
 
 -- Loop Auto TP Elemental
 task.spawn(function()
@@ -485,13 +577,13 @@ task.spawn(function()
                 while autoTeleportAktif do
                     local realTimeSchedule = GetEventScheduleWIB()
                     if realTimeSchedule.state == "ACTIVE" then break end 
-                    UILabels_Status.Text = "CD: " .. formatSecondsToText(realTimeSchedule.timeLeft)
-                    UILabels_Status.TextColor3 = Color3.fromRGB(255, 200, 50)
+                    UIStatus_Elemental.Text = "CD: " .. formatSecondsToText(realTimeSchedule.timeLeft)
+                    UIStatus_Elemental.TextColor3 = Color3.fromRGB(255, 200, 50)
                     task.wait(1)
                 end
             elseif schedule.state == "ACTIVE" then
-                UILabels_Status.Text = "MENUJU PAPAN..."
-                UILabels_Status.TextColor3 = Color3.fromRGB(100, 200, 255)
+                UIStatus_Elemental.Text = "MENUJU PAPAN..."
+                UIStatus_Elemental.TextColor3 = Color3.fromRGB(100, 200, 255)
                 hrp.CFrame = spotKordinat.Board
                 hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                 task.wait(1.5)
@@ -502,8 +594,8 @@ task.spawn(function()
                     while autoTeleportAktif do
                         local realTimeSchedule = GetEventScheduleWIB()
                         if realTimeSchedule.state == "COOLDOWN" then break end 
-                        UILabels_Status.Text = string.upper(cuacaAktif) .. ": " .. formatSecondsToText(realTimeSchedule.timeLeft)
-                        UILabels_Status.TextColor3 = Color3.fromRGB(50, 255, 100)
+                        UIStatus_Elemental.Text = string.upper(cuacaAktif) .. ": " .. formatSecondsToText(realTimeSchedule.timeLeft)
+                        UIStatus_Elemental.TextColor3 = Color3.fromRGB(50, 255, 100)
                         
                         if hrp and targetCFrame and (hrp.Position - targetCFrame.Position).Magnitude > 25 then
                             hrp.CFrame = CFrame.new(targetCFrame.Position + Vector3.new(0, 3, 0)) * targetCFrame.Rotation
@@ -512,8 +604,8 @@ task.spawn(function()
                         task.wait(1)
                     end
                 else
-                    UILabels_Status.Text = "MENUNGGU ICON CUACA..."
-                    UILabels_Status.TextColor3 = c_subtext
+                    UIStatus_Elemental.Text = "MENUNGGU ICON CUACA..."
+                    UIStatus_Elemental.TextColor3 = c_subtext
                     task.wait(1)
                 end
             end
@@ -521,7 +613,7 @@ task.spawn(function()
     end
 end)
 
--- Loop Auto Rotate (1 JAM + COUNTDOWN TIMER REALTIME)
+-- Loop Auto Rotate 1 Jam (3600 Detik)
 task.spawn(function()
     while true do
         if autoRotateAktif then
@@ -532,7 +624,6 @@ task.spawn(function()
                 local targetAngle = math.rad(poolAngles[currentPoolIndex])
                 local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
                 
-                -- FORCE ROTATE POSISI
                 for i = 1, 6 do
                     if hrp and hrp.Parent then
                         hrp.CFrame = targetCFrame
@@ -545,12 +636,11 @@ task.spawn(function()
                 currentPoolIndex = currentPoolIndex + 1
                 if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
                 
-                -- COUNTDOWN TIMER 1 JAM (3600 DETIK)
                 local elapsed = 0
                 while elapsed < rotateInterval and autoRotateAktif do
                     local sisaDetik = rotateInterval - elapsed
-                    UILabels_RotateStatus.Text = "NEXT ROTATE: " .. formatSecondsToText(sisaDetik)
-                    UILabels_RotateStatus.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    UIStatus_Rotate.Text = "NEXT ROTATE: " .. formatSecondsToText(sisaDetik)
+                    UIStatus_Rotate.TextColor3 = Color3.fromRGB(50, 255, 100)
                     task.wait(1)
                     elapsed = elapsed + 1
                 end
