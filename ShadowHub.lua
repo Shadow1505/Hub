@@ -4,7 +4,6 @@ local RunService = game:GetService("RunService")
 local MaterialService = game:GetService("MaterialService")
 local Lighting = game:GetService("Lighting")
 local VirtualUser = game:GetService("VirtualUser")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,27 +12,29 @@ local workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 
 -- ========================================================
--- 1. CONFIG SYSTEM (SAVE / LOAD AUTOMATIC)
+-- 1. CONFIG SYSTEM (SAVE / LOAD / RESET AUTOMATIC)
 -- ========================================================
 local ConfigFileName = "ShadowHub_Config.json"
-local ConfigData = {
+
+-- Data Default (Bawaan Pabrik, Mati Semua)
+local DefaultConfig = {
     AutoTP = false,
     AutoRotate = false,
-    AutoShake = false,
-    AutoSell = false,
-    LegitFishing = false,
-    InstantFishing = false,
-    ModeCast = "Perfect",
-    InstantDelay = 0.4,
-    InstantFastReel = false,
     FPSBooster = false,
     Disable3D = false,
     ClearWater = false,
     Limit30FPS = false,
     AutoRAM = false,
     AntiAFK = true,
-    WebhookURL = ""
+    WebhookStatusURL = "",
+    WebhookInventoryURL = "",
+    WebhookCatchURL = ""
 }
+
+local ConfigData = {}
+for k, v in pairs(DefaultConfig) do 
+    ConfigData[k] = v 
+end
 
 local function SaveConfig()
     if writefile then
@@ -54,10 +55,20 @@ local function LoadConfig()
     end
 end
 
-LoadConfig() -- Auto-Load saat script dieksekusi
+local function ResetConfig()
+    for k, v in pairs(DefaultConfig) do 
+        ConfigData[k] = v 
+    end
+    SaveConfig()
+    if player then
+        player:Kick("Settingan berhasil direset ke Default! Silakan Rejoin agar UI kembali segar.")
+    end
+end
+
+LoadConfig()
 
 -- ========================================================
--- 2. DATA KOORDINAT & VARIABEL SISTEM
+-- 2. DATA KOORDINAT & DETEKSI MAP
 -- ========================================================
 local spotKordinat = {
     Board = CFrame.lookAt(Vector3.new(-855.63, 44.43, 5187.01), Vector3.new(-855.63, 44.43, 5187.01) + Vector3.new(0, 0, 1)),
@@ -72,33 +83,90 @@ local DatabaseIconCuaca = {
     ["76632496002371"]  = "Volcano",
 }
 
+local daftarPulau = {
+    {name = "Moosewood", pos = Vector3.new(380, 135, 230), radius = 600},
+    {name = "Roslit Bay", pos = Vector3.new(-1470, 130, 720), radius = 600},
+    {name = "Sunstone Island", pos = Vector3.new(-930, 130, -1120), radius = 500},
+    {name = "Snowcap Island", pos = Vector3.new(2600, 135, 2400), radius = 600},
+    {name = "Terrapin Island", pos = Vector3.new(-180, 140, 1900), radius = 500},
+    {name = "Mushgrove Swamp", pos = Vector3.new(2450, 130, -700), radius = 600},
+    {name = "Desolate Deep", pos = Vector3.new(-800, -600, 1200), radius = 1000},
+    {name = "Ancient Isle", pos = Vector3.new(-6000, 200, -8000), radius = 1200},
+    {name = "Keepers Sanctuary", pos = Vector3.new(-800, 130, 5300), radius = 500},
+    {name = "Forsaken Shores", pos = Vector3.new(-2500, 130, 1500), radius = 600},
+    {name = "Event Area / FischFright", pos = Vector3.new(-855, 45, 5187), radius = 400}
+}
+
 local posisiSimpanan = nil
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
 local currentPoolIndex = 1
 local rotateInterval = 3600
 
--- ========================================================
--- 3. ALGORITMA CORE & ITEM TRACKER
--- ========================================================
-local function GetItemCount(itemName)
-    local count = 0
-    local backpack = player:FindFirstChild("Backpack")
-    local char = player.Character
+local function GetCurrentMapName()
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return "Unknown Location" end
+    local pos = hrp.Position
 
-    local function checkContainer(container)
+    local mapNameFromUI = nil
+    pcall(function()
+        local pGui = player:FindFirstChild("PlayerGui")
+        if pGui then
+            local hud = pGui:FindFirstChild("hud") or pGui:FindFirstChild("HUD")
+            if hud then
+                local zone = hud:FindFirstChild("zone", true) or hud:FindFirstChild("location", true)
+                if zone and zone:IsA("TextLabel") and zone.Text ~= "" then
+                    mapNameFromUI = zone.Text
+                end
+            end
+        end
+    end)
+    if mapNameFromUI then return mapNameFromUI end
+
+    local closest = "Lautan Luas (Open Ocean)"
+    local minDist = math.huge
+    for _, island in ipairs(daftarPulau) do
+        local dist = (pos - island.pos).Magnitude
+        if dist <= island.radius and dist < minDist then
+            minDist = dist
+            closest = island.name
+        end
+    end
+    return closest
+end
+
+-- ========================================================
+-- 3. ALGORITMA TRACKER ITEM & INVENTORI
+-- ========================================================
+local function GetDetailedItemCounts()
+    local counts = { Runic = 0, Evolved = 0, Forgotten = 0, Secret = 0 }
+
+    local function scanContainer(container)
         if not container then return end
         for _, item in ipairs(container:GetChildren()) do
-            if string.find(string.lower(item.Name), string.lower(itemName)) then
-                local val = item:FindFirstChild("Value") or item:FindFirstChild("Amount") or item:FindFirstChild("Count")
-                count = count + (val and val.Value or 1)
+            local nameLower = string.lower(item.Name)
+            local valObj = item:FindFirstChild("Value") or item:FindFirstChild("Amount") or item:FindFirstChild("Count")
+            local amount = valObj and valObj.Value or 1
+
+            if string.find(nameLower, "runic enchant stone") or string.find(nameLower, "runic stone") then
+                counts.Runic = counts.Runic + amount
+            elseif string.find(nameLower, "evolved enchant stone") or string.find(nameLower, "evolved stone") then
+                counts.Evolved = counts.Evolved + amount
+            elseif string.find(nameLower, "forgotten") then
+                counts.Forgotten = counts.Forgotten + amount
+            end
+
+            local rarity = item:GetAttribute("Rarity") or item:FindFirstChild("Rarity")
+            local rarityStr = rarity and tostring(rarity.Value or rarity) or ""
+            if string.find(string.lower(rarityStr), "secret") or string.find(nameLower, "secret") then
+                counts.Secret = counts.Secret + amount
             end
         end
     end
 
-    checkContainer(backpack)
-    checkContainer(char)
-    return count
+    scanContainer(player:FindFirstChild("Backpack"))
+    scanContainer(player.Character)
+    return counts
 end
 
 local function GetEventScheduleWIB()
@@ -161,32 +229,55 @@ local function PulangKeSetPos()
     end
 end
 
-local function SendDiscordWebhook()
-    if ConfigData.WebhookURL == "" then return end
+-- ========================================================
+-- 4. DISCORD WEBHOOK ENGINE
+-- ========================================================
+local function PostWebhook(url, payload)
+    if not url or url == "" then return end
     pcall(function()
-        local runic = GetItemCount("Runic Enchant Stone")
-        local evolved = GetItemCount("Evolved Enchant Stone")
-        
         local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
         if req then
             req({
-                Url = ConfigData.WebhookURL,
+                Url = url,
                 Method = "POST",
                 Headers = {["Content-Type"] = "application/json"},
-                Body = HttpService:JSONEncode({
-                    username = "Shadow Hub Reporter",
-                    content = string.format("```\n👤 USERNAME: %s\n🟢 STATUS: ONLINE & ACTIVE\n--------------------------------\n🗿 Runic Enchant Stone: %d\n⚡ Evolved Enchant Stone: %d\n```", player.Name, runic, evolved)
-                })
+                Body = HttpService:JSONEncode(payload)
             })
         end
     end)
 end
 
+local function SendStatusWebhook()
+    if ConfigData.WebhookStatusURL == "" then return end
+    local map = GetCurrentMapName()
+    PostWebhook(ConfigData.WebhookStatusURL, {
+        username = "Shadow Hub Status Reporter",
+        content = string.format("```\n👤 USERNAME : %s\n🟢 STATUS   : ONLINE & ACTIVE\n🗺️ MAP/PULAU : %s\n```", player.Name, map)
+    })
+end
+
+local function SendInventoryWebhook(counts)
+    if ConfigData.WebhookInventoryURL == "" then return end
+    PostWebhook(ConfigData.WebhookInventoryURL, {
+        username = "Shadow Hub Inventory Tracker",
+        content = string.format("```\n🎒 INVENTORI BERTAMBAH! [%s]\n--------------------------------\n🗿 Runic Enchant Stone   : %d\n⚡ Evolved Enchant Stone : %d\n🐟 Forgotten Fish        : %d\n✨ Secret Fish           : %d\n```", 
+            player.Name, counts.Runic, counts.Evolved, counts.Forgotten, counts.Secret)
+    })
+end
+
+local function SendCatchLogWebhook(msg)
+    if ConfigData.WebhookCatchURL == "" then return end
+    PostWebhook(ConfigData.WebhookCatchURL, {
+        username = "Shadow Catch Logger",
+        content = string.format("```\n📢 [CATCH / CHAT LOG EVENT]\n👤 Player : %s\n📍 Lokasi : %s\n💬 Text   : %s\n```", player.Name, GetCurrentMapName(), msg)
+    })
+end
+
 -- ========================================================
--- 4. UI SYSTEM (SHADOW PANEL V7)
+-- 5. UI SYSTEM (SHADOW PANEL V8)
 -- ========================================================
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "Shadow_Panel_V7"
+ScreenGui.Name = "Shadow_Panel_V8"
 local targetGui = (gethui and gethui()) or game:GetService("CoreGui") or player.PlayerGui
 ScreenGui.Parent = targetGui
 
@@ -216,7 +307,7 @@ Header.Size = UDim2.new(1, 0, 0, 40); Header.BackgroundTransparency = 1
 
 local TitleLabel = Instance.new("TextLabel", Header)
 TitleLabel.Size = UDim2.new(0.4, 0, 1, 0); TitleLabel.Position = UDim2.new(0, 15, 0, 0)
-TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW HUB V7"
+TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW HUB V8"
 TitleLabel.TextColor3 = c_accent; TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.TextSize = 13
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
@@ -245,7 +336,7 @@ CloseBtn.MouseButton1Click:Connect(function() MainFrame.Visible = false; LogoBtn
 
 -- SIDEBAR SYSTEM
 local Sidebar = Instance.new("Frame", MainFrame)
-Sidebar.Size = UDim2.new(0, 140, 1, -40); Sidebar.Position = UDim2.new(0, 0, 0, 40)
+Sidebar.Size = UDim2.new(0, 150, 1, -40); Sidebar.Position = UDim2.new(0, 0, 0, 40)
 Sidebar.BackgroundColor3 = c_sidebar; Sidebar.BorderSizePixel = 0
 Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 10)
 local SidebarList = Instance.new("UIListLayout", Sidebar)
@@ -257,7 +348,7 @@ local function CreateTab(name, active)
     local btn = Instance.new("TextButton", Sidebar)
     btn.Size = UDim2.new(0.92, 0, 0, 34); btn.BackgroundColor3 = active and Color3.fromRGB(35, 35, 45) or c_sidebar
     btn.Text = "  " .. name; btn.TextColor3 = active and c_text or c_subtext
-    btn.Font = Enum.Font.GothamSemibold; btn.TextSize = 11; btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Font = Enum.Font.GothamSemibold; btn.TextSize = 10; btn.TextXAlignment = Enum.TextXAlignment.Left
     btn.AutoButtonColor = false; btn.BorderSizePixel = 0
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
     
@@ -267,7 +358,7 @@ local function CreateTab(name, active)
     Instance.new("UICorner", indicator).CornerRadius = UDim.new(1, 0)
 
     local PageScroll = Instance.new("ScrollingFrame", MainFrame)
-    PageScroll.Size = UDim2.new(1, -150, 1, -50); PageScroll.Position = UDim2.new(0, 150, 0, 40)
+    PageScroll.Size = UDim2.new(1, -160, 1, -50); PageScroll.Position = UDim2.new(0, 160, 0, 40)
     PageScroll.BackgroundTransparency = 1; PageScroll.BorderSizePixel = 0
     PageScroll.ScrollBarThickness = 3; PageScroll.ScrollBarImageColor3 = c_accent; PageScroll.Visible = active
     local Layout = Instance.new("UIListLayout", PageScroll)
@@ -287,11 +378,11 @@ local function CreateTab(name, active)
     return PageScroll
 end
 
--- PAGE CREATION
-local TabFishing    = CreateTab("🎣 Auto Fishing", true)
-local TabAutomation = CreateTab("⚡ Automation", false)
+-- CREATING SIDEBAR TABS
+local TabAutomation = CreateTab("⚡ Automation", true)
 local TabBooster    = CreateTab("🚀 Booster & RAM", false)
-local TabConfig     = CreateTab("⚙️ Config & Webhook", false)
+local TabWebhooks   = CreateTab("📡 Discord Webhooks", false)
+local TabConfig     = CreateTab("⚙️ Config Manager", false)
 
 -- UI BUILDERS
 local function CreateDropdown(parent, titleText)
@@ -402,22 +493,7 @@ local function CreateStatusLabel(parent)
 end
 
 -- ========================================================
--- 5. MENU FISHING CORE (ADAPTASI LYNXX PANEL)
--- ========================================================
-local DropLynx = CreateDropdown(TabFishing, "Main Fishing Automation")
-
-CreateToggle(DropLynx, "Legit Fishing", "LegitFishing", function(state) end)
-CreateToggle(DropLynx, "Instant Fishing", "InstantFishing", function(state) end)
-
-CreateTextBox(DropLynx, "Mode Cast (Normal / Perfect)", "ModeCast", function(txt) end)
-CreateTextBox(DropLynx, "Instant Delay (Contoh: 0.4)", "InstantDelay", function(txt)
-    ConfigData.InstantDelay = tonumber(txt) or 0.4
-end)
-
-CreateToggle(DropLynx, "Instant Fast Reel [BETA]", "InstantFastReel", function(state) end)
-
--- ========================================================
--- 6. MENU OTHER TABS
+-- 6. MENU SETUP (AUTOMATION, BOOSTER, DISCORD, CONFIG)
 -- ========================================================
 
 -- TAB AUTOMATION
@@ -509,76 +585,101 @@ end)
 
 CreateToggle(DropBooster, "Auto RAM Cleaner (60s)", "AutoRAM", function(state) end)
 
--- TAB CONFIG & WEBHOOK
+-- TAB DISCORD WEBHOOKS
+local DropStatusWeb = CreateDropdown(TabWebhooks, "👤 Status & Map Webhook (20m)")
+CreateTextBox(DropStatusWeb, "Paste Webhook URL Status...", "WebhookStatusURL", function(txt) end)
+CreateButton(DropStatusWeb, "Send Test Status Report", function() SendStatusWebhook() end)
+
+local DropInvWeb = CreateDropdown(TabWebhooks, "🎒 Inventory Tracker Webhook")
+CreateTextBox(DropInvWeb, "Paste Webhook URL Inventory...", "WebhookInventoryURL", function(txt) end)
+CreateButton(DropInvWeb, "Send Test Inventory Report", function()
+    local c = GetDetailedItemCounts()
+    SendInventoryWebhook(c)
+end)
+
+local DropCatchWeb = CreateDropdown(TabWebhooks, "📢 Catch & Chat Log Webhook")
+CreateTextBox(DropCatchWeb, "Paste Webhook URL Chat Catch...", "WebhookCatchURL", function(txt) end)
+CreateButton(DropCatchWeb, "Send Test Catch Log", function()
+    SendCatchLogWebhook("[TEST] Berhasil menangkap Secret Fish / Stone!")
+end)
+
+-- TAB CONFIG MANAGER
 local DropConfigSystem = CreateDropdown(TabConfig, "Configuration Manager")
-
-CreateButton(DropConfigSystem, "💾 Save UI Settings Manual", function()
-    SaveConfig()
-end)
-
-CreateButton(DropConfigSystem, "🔄 Load UI Settings Manual", function()
-    LoadConfig()
-end)
-
-local DropWebhook = CreateDropdown(TabConfig, "Discord Webhook (30m Interval)")
-
-CreateTextBox(DropWebhook, "Paste Discord Webhook URL...", "WebhookURL", function(txt) end)
-
-CreateButton(DropWebhook, "Send Manual Webhook Report", function()
-    SendDiscordWebhook()
+CreateButton(DropConfigSystem, "💾 Save UI Settings Manual", function() SaveConfig() end)
+CreateButton(DropConfigSystem, "🔄 Load UI Settings Manual", function() LoadConfig() end)
+CreateButton(DropConfigSystem, "⚠️ Reset Settingan (Auto Rejoin)", function()
+    ResetConfig()
 end)
 
 -- ==========================================================
--- 7. BACKGROUND THREADS & AUTO FISHING ENGINE
+-- 7. THREADS & BACKGROUND ENGINES
 -- ==========================================================
 
--- AUTO FISHING INTI (BYPASS ENGINE)
+-- 1. THREAD STATUS KARAKTER & MAP (SETIAP 20 MENIT)
 task.spawn(function()
     while true do
-        task.wait(ConfigData.InstantDelay or 0.4)
-        if ConfigData.InstantFishing or ConfigData.LegitFishing then
-            pcall(function()
-                local character = player.Character
-                local tool = character and character:FindFirstChildOfClass("Tool")
-                
-                if tool and tool:FindFirstChild("events") then
-                    local castEvt = tool.events:FindFirstChild("cast") or tool.events:FindFirstChild("CastLine")
-                    if castEvt then
-                        local castType = (string.lower(ConfigData.ModeCast) == "perfect") and 100 or 50
-                        castEvt:FireServer(castType)
-                    end
+        SendStatusWebhook()
+        task.wait(1200)
+    end
+end)
+
+-- 2. THREAD SMART INVENTORY TRACKER (KIRIM HANYA JIKA JUMLAH BERTAMBAH)
+task.spawn(function()
+    local lastCounts = { Runic = -1, Evolved = -1, Forgotten = -1, Secret = -1 }
+    while true do
+        task.wait(5)
+        if ConfigData.WebhookInventoryURL ~= "" then
+            local current = GetDetailedItemCounts()
+            
+            if lastCounts.Runic ~= -1 then
+                if current.Runic > lastCounts.Runic or current.Evolved > lastCounts.Evolved or 
+                   current.Forgotten > lastCounts.Forgotten or current.Secret > lastCounts.Secret then
+                    
+                    SendInventoryWebhook(current)
+                    lastCounts.Runic = current.Runic
+                    lastCounts.Evolved = current.Evolved
+                    lastCounts.Forgotten = current.Forgotten
+                    lastCounts.Secret = current.Secret
                 end
-                
-                local pGui = player:FindFirstChild("PlayerGui")
-                local shakeUI = pGui and pGui:FindFirstChild("shakeui")
-                if shakeUI and shakeUI:FindFirstChild("safezone") then
-                    local btn = shakeUI.safezone:FindFirstChild("button")
-                    if btn and btn.Visible then
-                        local px = btn.AbsolutePosition.X + (btn.AbsoluteSize.X / 2)
-                        local py = btn.AbsolutePosition.Y + (btn.AbsoluteSize.Y / 2)
-                        VirtualInputManager:SendMouseButtonEvent(px, py, 0, true, game, 0)
-                        VirtualInputManager:SendMouseButtonEvent(px, py, 0, false, game, 0)
-                    end
-                end
-                
-                if ConfigData.InstantFastReel then
-                    local reelUI = pGui and pGui:FindFirstChild("reel")
-                    if reelUI then
-                        local reelEvt = tool and tool:FindFirstChild("events") and tool.events:FindFirstChild("reelfinished")
-                        if reelEvt then reelEvt:FireServer(100, true) end
-                    end
-                end
-            end)
+            else
+                lastCounts.Runic = current.Runic
+                lastCounts.Evolved = current.Evolved
+                lastCounts.Forgotten = current.Forgotten
+                lastCounts.Secret = current.Secret
+            end
         end
     end
 end)
 
--- DISCORD WEBHOOK AUTO 30 MENIT
+-- 3. CHAT LOG & CATCH DETECTOR ENGINE (REALTIME)
 task.spawn(function()
-    while true do
-        task.wait(1800) -- 30 menit (1800 detik)
-        SendDiscordWebhook()
-    end
+    pcall(function()
+        local TextChatService = game:GetService("TextChatService")
+        TextChatService.OnIncomingChatMessage = function(message)
+            if message and message.Text then
+                local txt = message.Text
+                local lowerTxt = string.lower(txt)
+                if string.find(lowerTxt, "secret") or string.find(lowerTxt, "enchant stone") or string.find(lowerTxt, "forgotten") then
+                    SendCatchLogWebhook(txt)
+                end
+            end
+        end
+    end)
+
+    pcall(function()
+        local chatEvents = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        if chatEvents and chatEvents:FindFirstChild("OnMessageDoneFiltering") then
+            chatEvents.OnMessageDoneFiltering.OnClientEvent:Connect(function(data)
+                if data and data.Message then
+                    local txt = tostring(data.Message)
+                    local lowerTxt = string.lower(txt)
+                    if string.find(lowerTxt, "secret") or string.find(lowerTxt, "enchant stone") or string.find(lowerTxt, "forgotten") then
+                        SendCatchLogWebhook(txt)
+                    end
+                end
+            end)
+        end
+    end)
 end)
 
 -- ANTI-AFK ENGINE
@@ -593,9 +694,7 @@ end)
 task.spawn(function()
     while true do
         task.wait(60)
-        if ConfigData.AutoRAM then
-            collectgarbage("collect")
-        end
+        if ConfigData.AutoRAM then collectgarbage("collect") end
     end
 end)
 
