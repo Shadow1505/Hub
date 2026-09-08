@@ -150,7 +150,7 @@ local function PulangKeSetPos()
 end
 
 -- ========================================================
--- 3. ENGINE WEBHOOK & PLAYER TRACKER (LOGIKA DARI SCRIPT TRACKER)
+-- 3. ENGINE WEBHOOK & PLAYER TRACKER
 -- ========================================================
 local trackedPlayers = {}
 local UIStatus_PlayerMon
@@ -249,6 +249,9 @@ local function SendPlayerList(isManual)
         return
     end
 
+    -- [UPDATE FIX PC] Membersihkan spasi atau enter tersembunyi dari copy-paste
+    url = url:match("^%s*(.-)%s*$")
+
     if isManual and UIStatus_PlayerMon then
         UIStatus_PlayerMon.Text = "Status: Menembak Webhook..."
         UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 200, 50)
@@ -272,7 +275,8 @@ local function SendPlayerList(isManual)
         table.insert(playerLines, string.format("%s %d. %s (@%s) | %s", icon, i, data.DisplayName, data.Name, locInfo))
     end
 
-    local maxPlayer = Players.MaxPlayers; local disconnectedCount = totalTracked - onlineCount
+    local maxPlayer = Players.MaxPlayers
+    local disconnectedCount = totalTracked - onlineCount
     local listText = table.concat(playerLines, "\n")
     
     if #listText > 1800 then listText = string.sub(listText, 1, 1800) .. "\n... (Daftar dipotong)" end
@@ -281,6 +285,7 @@ local function SendPlayerList(isManual)
     local tanggalWIB = os.date("!%d/%m/%y", wibTime); local jamWIB = os.date("!%H:%M:%S", wibTime)     
 
     local payload = {
+        ["content"] = "", -- [UPDATE FIX PC] Wajib ada untuk beberapa library HTTP PC
         ["username"] = "Server Player Monitor",
         ["embeds"] = {{
             ["title"] = isManual and "🛠️ [MANUAL TEST] Server Player Tracker" or "🌐 Server Player Tracker",
@@ -290,21 +295,25 @@ local function SendPlayerList(isManual)
                 {["name"] = "📊 Ringkasan Populasi", ["value"] = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d\n📌 **Total Terdeteksi:** %d", onlineCount, maxPlayer, disconnectedCount, totalTracked), ["inline"] = false},
                 {["name"] = "👤 Daftar Player & Lokasi Map", ["value"] = totalTracked > 0 and ("```\n" .. listText .. "\n```") or "```\nTidak ada player\n```", ["inline"] = false}
             },
-            ["timestamp"] = DateTime.now():ToIsoDate()
+            -- [UPDATE FIX PC] Menggunakan os.date murni Lua menghindari gagal Encode JSON di PC
+            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ") 
         }}
     }
 
     local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if requestFunc then
         task.spawn(function()
-            local response = requestFunc({
-                Url = url, 
-                Method = "POST", 
-                Headers = {["Content-Type"] = "application/json"}, 
-                Body = HttpService:JSONEncode(payload)
-            })
+            -- [UPDATE FIX PC] Dibungkus pcall agar PC tidak nge-log merah/force close jika API lemot
+            local success, response = pcall(function()
+                return requestFunc({
+                    Url = url, 
+                    Method = "POST", 
+                    Headers = {["Content-Type"] = "application/json"}, 
+                    Body = HttpService:JSONEncode(payload)
+                })
+            end)
 
-            if response and (response.StatusCode == 200 or response.StatusCode == 204) then
+            if success and response and (response.StatusCode == 200 or response.StatusCode == 204) then
                 if UIStatus_PlayerMon then
                     trackerUIPaused = true
                     UIStatus_PlayerMon.Text = "Status: TEMBUS (Taruhan Anda Menang)!"
@@ -318,8 +327,12 @@ local function SendPlayerList(isManual)
                     UIStatus_PlayerMon.Text = "Status: DITOLAK! Cek F9 (Saya Menang)"
                     UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
                     warn("=== ERROR WEBHOOK SHADOW HUB ===")
-                    warn("Status Code: " .. tostring(response and response.StatusCode or "N/A"))
-                    warn("Body: " .. tostring(response and response.Body or "N/A"))
+                    if not success then
+                        warn("Client HTTP Terhenti (Pcall Catch): " .. tostring(response))
+                    else
+                        warn("Status Code: " .. tostring(response and response.StatusCode or "N/A"))
+                        warn("Body: " .. tostring(response and response.Body or "N/A"))
+                    end
                     warn("==================================")
                     task.wait(5)
                     trackerUIPaused = false
