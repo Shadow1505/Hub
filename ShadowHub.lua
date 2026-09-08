@@ -571,7 +571,7 @@ CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL
 local DropWebToggles = CreateDropdown(TabWebhooks, "⚙️ Active Webhook Features")
 UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles)
 
-local trackerInterval = 1500
+local trackerInterval = 3600
 local trackerRemaining = 0
 local isTrackerActive = false
 
