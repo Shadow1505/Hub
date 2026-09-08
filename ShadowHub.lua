@@ -19,8 +19,11 @@ local UI_Updaters = {}
 
 local DefaultConfig = {
     AutoTP = false,
-    AutoRotate = false,
+    AutoRotate = false,   -- Feature 1: Mancing Map 1
+    AutoMap2 = false,     -- Feature 2: Mancing Map 2
+    AutoDualMap = false,  -- Feature 3: Auto Switch Map 1 & Map 2
     FPSBooster = false,
+    ClayPotato = false,   -- Feature 4: Clay Potato Mode + Always Daylight
     Disable3D = false,
     ClearWater = false,
     Limit30FPS = false,
@@ -71,10 +74,20 @@ local spotKordinat = {
 }
 local DatabaseIconCuaca = {["118379404229807"] = "Blizzard", ["105076841543450"] = "Storm", ["76632496002371"] = "Volcano"}
 local posisiSimpanan = nil
+
+-- DATA MAP 1
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
 local currentPoolIndex = 1
-local rotateInterval = 3600
+
+-- DATA MAP 2 (Tambang Canyon Tembaga)
+local map2Pos = Vector3.new(-4014.58, -543.00, 564.95)
+local map2Degree = 46.85
+local map2CFrame = CFrame.new(map2Pos) * CFrame.Angles(0, math.rad(map2Degree), 0)
+
+-- TIMING CONFIGURATION (REAL TIME)
+local rotateInterval = 1200     -- 1 Jam (3600 detik) dibagi 3 kolam = 20 Menit (1200 detik) per kolam
+local dualMapInterval = 3600    -- Pindah map setiap 1 Jam (3600 detik)
 
 local function GetEventScheduleWIB()
     local utc_time = os.time()
@@ -137,7 +150,7 @@ local function PulangKeSetPos()
 end
 
 -- ========================================================
--- 3. ENGINE WEBHOOK & PLAYER TRACKER (AKURASI MAP DIPERBARUI)
+-- 3. ENGINE WEBHOOK & PLAYER TRACKER
 -- ========================================================
 local trackedPlayers = {}
 local UIStatus_PlayerMon
@@ -262,13 +275,11 @@ local function SendPlayerList(isManual)
     local maxPlayer = Players.MaxPlayers; local disconnectedCount = totalTracked - onlineCount
     local listText = table.concat(playerLines, "\n")
     
-    -- MENGGUNAKAN BATAS 1800 SESUAI PERMINTAAN TARUHAN
     if #listText > 1800 then listText = string.sub(listText, 1, 1800) .. "\n... (Daftar dipotong)" end
 
     local wibTime = os.time() + (7 * 3600)
     local tanggalWIB = os.date("!%d/%m/%y", wibTime); local jamWIB = os.date("!%H:%M:%S", wibTime)     
 
-    -- MENGGUNAKAN JSON PAKSA (["key"]) DAN DATETIME (TARUHAN)
     local payload = {
         ["username"] = "Server Player Monitor",
         ["embeds"] = {{
@@ -279,14 +290,13 @@ local function SendPlayerList(isManual)
                 {["name"] = "📊 Ringkasan Populasi", ["value"] = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d\n📌 **Total Terdeteksi:** %d", onlineCount, maxPlayer, disconnectedCount, totalTracked), ["inline"] = false},
                 {["name"] = "👤 Daftar Player & Lokasi Map", ["value"] = totalTracked > 0 and ("```\n" .. listText .. "\n```") or "```\nTidak ada player\n```", ["inline"] = false}
             },
-            ["timestamp"] = DateTime.now():ToIsoDate() -- INI PENENTUAN
+            ["timestamp"] = DateTime.now():ToIsoDate()
         }}
     }
 
     local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if requestFunc then
         task.spawn(function()
-            -- BUKA SEGEL PCALL AGAR BISA TERIAK DI F9
             local response = requestFunc({
                 Url = url, 
                 Method = "POST", 
@@ -297,7 +307,7 @@ local function SendPlayerList(isManual)
             if response and (response.StatusCode == 200 or response.StatusCode == 204) then
                 if UIStatus_PlayerMon then
                     trackerUIPaused = true
-                    UIStatus_PlayerMon.Text = "Status: TEMBUS (Taruhan Anda Menang)!"
+                    UIStatus_PlayerMon.Text = "Status: TEMBUS!"
                     UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
                     task.wait(3)
                     trackerUIPaused = false
@@ -305,32 +315,128 @@ local function SendPlayerList(isManual)
             else
                 if UIStatus_PlayerMon then
                     trackerUIPaused = true
-                    UIStatus_PlayerMon.Text = "Status: DITOLAK! Cek F9 (Saya Menang)"
+                    UIStatus_PlayerMon.Text = "Status: DITOLAK! Cek F9"
                     UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
-                    warn("=== ERROR WEBHOOK SHADOW HUB ===")
-                    warn("Status Code: " .. tostring(response and response.StatusCode or "N/A"))
-                    warn("Body: " .. tostring(response and response.Body or "N/A"))
-                    warn("==================================")
                     task.wait(5)
                     trackerUIPaused = false
                 end
             end
         end)
-    else
-        if UIStatus_PlayerMon then
-            task.spawn(function()
-                trackerUIPaused = true
-                UIStatus_PlayerMon.Text = "Status: Executor Tidak Support!"
-                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
-                task.wait(3)
-                trackerUIPaused = false
-            end)
-        end
     end
 end
 
 -- ========================================================
--- 4. UI SYSTEM (SHADOW PANEL V8)
+-- 4. ENGINE CLAY POTATO MODE + ALWAYS DAYLIGHT
+-- ========================================================
+local clayPotatoActive = false
+local clayLightingConn = nil
+local clayDescendantConn = nil
+
+local function EnableClayPotato()
+    if clayPotatoActive then return end
+    clayPotatoActive = true
+
+    if setfpscap then pcall(setfpscap, 60) end
+
+    local GRAY_COLOR = Color3.fromRGB(140, 140, 140)
+
+    local function forceDaylight()
+        if not ConfigData.ClayPotato then return end
+        pcall(function()
+            Lighting.TimeOfDay = "12:00:00"
+            Lighting.GlobalShadows = false
+            Lighting.Brightness = 2
+            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+            Lighting.FogEnd = 9e9
+        end)
+    end
+
+    forceDaylight()
+    if not clayLightingConn then
+        clayLightingConn = Lighting.Changed:Connect(function()
+            if ConfigData.ClayPotato then forceDaylight() end
+        end)
+    end
+
+    for _, effect in ipairs(Lighting:GetChildren()) do
+        if effect:IsA("PostEffect") or effect:IsA("Atmosphere") then
+            pcall(function() effect:Destroy() end)
+        end
+    end
+
+    pcall(function()
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            terrain.Decoration = false
+            terrain.WaterWaveSize = 0
+            terrain.WaterWaveSpeed = 0
+            terrain.WaterReflectance = 0
+            terrain.WaterTransparency = 0.8
+        end
+    end)
+
+    local function isMyPlayerStuff(obj)
+        if player.Character and (obj == player.Character or obj:IsDescendantOf(player.Character)) then
+            return true
+        end
+        local backpack = player:FindFirstChild("Backpack")
+        if backpack and (obj == backpack or obj:IsDescendantOf(backpack)) then
+            return true
+        end
+        return false
+    end
+
+    local function superNuke(obj)
+        if not obj or not ConfigData.ClayPotato then return end
+        if isMyPlayerStuff(obj) then return end
+
+        pcall(function()
+            if obj:IsA("BasePart") then
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.Reflectance = 0
+                obj.CastShadow = false
+                obj.Color = GRAY_COLOR
+                
+                if obj:IsA("MeshPart") then
+                    obj.TextureID = "" 
+                end
+            elseif obj:IsA("SpecialMesh") then
+                obj.TextureId = "" 
+            elseif obj:IsA("Texture") or obj:IsA("Decal") or obj:IsA("SurfaceAppearance") then
+                task.defer(function() pcall(function() obj:Destroy() end) end)
+            elseif obj:IsA("Clothing") or obj:IsA("ShirtGraphic") then
+                task.defer(function() pcall(function() obj:Destroy() end) end)
+            elseif obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("ParticleEmitter") 
+                or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Sparkles") or obj:IsA("Fire") 
+                or obj:IsA("Smoke") or obj:IsA("Highlight") then
+                obj.Enabled = false
+            elseif obj:IsA("Light") then 
+                obj.Enabled = false
+            end
+        end)
+    end
+
+    task.spawn(function()
+        local allObjects = workspace:GetDescendants()
+        for i = 1, #allObjects do
+            if not ConfigData.ClayPotato then break end
+            superNuke(allObjects[i])
+            if i % 300 == 0 then task.wait() end
+        end
+    end)
+
+    if not clayDescendantConn then
+        clayDescendantConn = workspace.DescendantAdded:Connect(function(obj)
+            if ConfigData.ClayPotato then
+                task.defer(superNuke, obj)
+            end
+        end)
+    end
+end
+
+-- ========================================================
+-- 5. UI SYSTEM (SHADOW PANEL V8)
 -- ========================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Shadow_Panel_V8"
@@ -538,7 +644,7 @@ local function CreateStatusLabel(parent)
 end
 
 -- ========================================================
--- 5. MENU SETUP
+-- 6. MENU SETUP
 -- ========================================================
 local DropElemental = CreateDropdown(TabAutomation, "Event Elemental TP")
 local UIStatus_Elemental = CreateStatusLabel(DropElemental)
@@ -552,14 +658,34 @@ CreateToggle(DropElemental, "Enable Auto TP Cuaca", "AutoTP", function(state)
     end
 end)
 
-local DropRotate = CreateDropdown(TabAutomation, "Auto Rotate Fishing")
+-- 1. FEATURE AUTO ROTATE MAP 1 (ONLY MAP 1)
+local DropRotate = CreateDropdown(TabAutomation, "1. Auto Rotate Fishing (Map 1 Only)")
 local UIStatus_Rotate = CreateStatusLabel(DropRotate)
-CreateToggle(DropRotate, "Enable Auto Rotate (1 Jam)", "AutoRotate", function(state)
-    if not state then UIStatus_Rotate.Text = "AUTO ROTATE: OFF"; UIStatus_Rotate.TextColor3 = c_subtext end
+CreateToggle(DropRotate, "Enable Auto Rotate Map 1", "AutoRotate", function(state)
+    if not state then UIStatus_Rotate.Text = "AUTO ROTATE MAP 1: OFF"; UIStatus_Rotate.TextColor3 = c_subtext end
+end)
+
+-- 2. FEATURE AUTO FISHING MAP 2 (ONLY MAP 2 / TAMBANG CANYON)
+local DropMap2 = CreateDropdown(TabAutomation, "2. Auto Fishing (Map 2 Canyon Only)")
+local UIStatus_Map2 = CreateStatusLabel(DropMap2)
+CreateToggle(DropMap2, "Enable Mancing Map 2", "AutoMap2", function(state)
+    if not state then UIStatus_Map2.Text = "AUTO MAP 2: OFF"; UIStatus_Map2.TextColor3 = c_subtext end
+end)
+
+-- 3. FEATURE AUTO DUAL MAP (SWITCH MAP 1 <-> MAP 2)
+local DropDualMap = CreateDropdown(TabAutomation, "3. Auto Switch Dual Map (Map 1 <-> Map 2)")
+local UIStatus_DualMap = CreateStatusLabel(DropDualMap)
+CreateToggle(DropDualMap, "Enable Auto Switch Map 1 & Map 2", "AutoDualMap", function(state)
+    if not state then UIStatus_DualMap.Text = "DUAL MAP SWITCH: OFF"; UIStatus_DualMap.TextColor3 = c_subtext end
 end)
 
 local DropBooster = CreateDropdown(TabBooster, "Graphic & Performance Booster")
 CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state) end)
+CreateToggle(DropBooster, "Clay Potato Mode (Anti-Lag & Daylight)", "ClayPotato", function(state)
+    if state then
+        EnableClayPotato()
+    end
+end)
 CreateToggle(DropBooster, "Disable 3D Rendering", "Disable3D", function(state) RunService:Set3dRenderingEnabled(not state) end)
 CreateToggle(DropBooster, "Clear Water (Hilangkan Air)", "ClearWater", function(state) end)
 CreateToggle(DropBooster, "Limit 30 FPS", "Limit30FPS", function(state) if setfpscap then setfpscap(state and 30 or 60) end end)
@@ -571,7 +697,7 @@ CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL
 local DropWebToggles = CreateDropdown(TabWebhooks, "⚙️ Active Webhook Features")
 UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles)
 
-local trackerInterval = 3600
+local trackerInterval = 1500
 local trackerRemaining = 0
 local isTrackerActive = false
 
@@ -603,7 +729,7 @@ BtnReset.MouseButton1Click:Connect(function()
 end)
 
 -- ==========================================================
--- 6. BACKGROUND ENGINES & THREADS
+-- 7. BACKGROUND ENGINES & THREADS
 -- ==========================================================
 task.spawn(function()
     while true do
@@ -629,6 +755,7 @@ player.Idled:Connect(function() if ConfigData.AntiAFK then VirtualUser:CaptureCo
 
 task.spawn(function() while true do task.wait(60); if ConfigData.AutoRAM then collectgarbage("collect") end end end)
 
+-- THREAD 1: EVENT ELEMENTAL TP
 task.spawn(function()
     while true do
         task.wait(1)
@@ -674,9 +801,10 @@ task.spawn(function()
     end
 end)
 
+-- THREAD 2: FITUR 1 (AUTO ROTATE MAP 1 - STANDALONE)
 task.spawn(function()
     while true do
-        if ConfigData.AutoRotate then
+        if ConfigData.AutoRotate and not ConfigData.AutoDualMap then
             local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local targetAngle = math.rad(poolAngles[currentPoolIndex])
@@ -690,14 +818,104 @@ task.spawn(function()
                 currentPoolIndex = currentPoolIndex + 1; if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
                 
                 local elapsed = 0
-                while elapsed < rotateInterval and ConfigData.AutoRotate do
+                while elapsed < rotateInterval and ConfigData.AutoRotate and not ConfigData.AutoDualMap do
                     local sisaDetik = rotateInterval - elapsed
-                    UIStatus_Rotate.Text = "NEXT ROTATE: " .. formatSecondsToText(sisaDetik)
+                    UIStatus_Rotate.Text = "MAP 1 ROTATE: " .. formatSecondsToText(sisaDetik)
                     UIStatus_Rotate.TextColor3 = Color3.fromRGB(50, 255, 100)
                     task.wait(1); elapsed = elapsed + 1
                 end
             else
                 task.wait(1)
+            end
+        else
+            task.wait(1)
+        end
+    end
+end)
+
+-- THREAD 3: FITUR 2 (MANCING MAP 2 CANYON - STANDALONE NO ROTATE)
+task.spawn(function()
+    while true do
+        if ConfigData.AutoMap2 and not ConfigData.AutoDualMap then
+            local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                if (hrp.Position - map2Pos).Magnitude > 5 then
+                    hrp.CFrame = map2CFrame
+                    hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                    hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                end
+                UIStatus_Map2.Text = "MAP 2 ACTIVE (STAY STAYING)"
+                UIStatus_Map2.TextColor3 = Color3.fromRGB(50, 255, 100)
+            end
+            task.wait(1)
+        else
+            task.wait(1)
+        end
+    end
+end)
+
+-- THREAD 4: FITUR 3 (AUTO SWITCH DUAL MAP 1 <-> MAP 2)
+task.spawn(function()
+    while true do
+        if ConfigData.AutoDualMap then
+            local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            
+            -- PHASE 1: MANCING DI MAP 1 (DENGAN AUTO ROTATE)
+            if ConfigData.AutoDualMap then
+                local map1Timer = 0
+                while map1Timer < dualMapInterval and ConfigData.AutoDualMap do
+                    hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local targetAngle = math.rad(poolAngles[currentPoolIndex])
+                        local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
+                        
+                        for i = 1, 4 do
+                            if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
+                            task.wait(0.05)
+                        end
+                        
+                        currentPoolIndex = currentPoolIndex + 1
+                        if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
+                    end
+
+                    local subTimer = 0
+                    while subTimer < rotateInterval and map1Timer < dualMapInterval and ConfigData.AutoDualMap do
+                        local sisaPindah = dualMapInterval - map1Timer
+                        UIStatus_DualMap.Text = string.format("MAP 1 (ROTATING) | SWITCH IN: %ds", sisaPindah)
+                        UIStatus_DualMap.TextColor3 = Color3.fromRGB(100, 200, 255)
+                        task.wait(1)
+                        subTimer = subTimer + 1
+                        map1Timer = map1Timer + 1
+                    end
+                end
+            end
+
+            -- PHASE 2: MANCING DI MAP 2 (NO ROTATE / ROTATE OFF / STAY FIT)
+            if ConfigData.AutoDualMap then
+                local map2Timer = 0
+                hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    for i = 1, 6 do
+                        hrp.CFrame = map2CFrame
+                        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                        hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                        task.wait(0.05)
+                    end
+                end
+
+                while map2Timer < dualMapInterval and ConfigData.AutoDualMap do
+                    hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp and (hrp.Position - map2Pos).Magnitude > 5 then
+                        hrp.CFrame = map2CFrame
+                        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                    end
+
+                    local sisaPindah = dualMapInterval - map2Timer
+                    UIStatus_DualMap.Text = string.format("MAP 2 (ROTATE OFF) | SWITCH IN: %ds", sisaPindah)
+                    UIStatus_DualMap.TextColor3 = Color3.fromRGB(255, 200, 50)
+                    task.wait(1)
+                    map2Timer = map2Timer + 1
+                end
             end
         else
             task.wait(1)
