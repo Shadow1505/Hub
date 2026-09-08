@@ -150,88 +150,50 @@ local function PulangKeSetPos()
 end
 
 -- ========================================================
--- 3. ENGINE WEBHOOK & PLAYER TRACKER
+-- 3. ENGINE WEBHOOK & PLAYER TRACKER (DIUPDATE DARI TESTING 2)
 -- ========================================================
+local MapDictionary = {
+    ["Crystalline Passage"] = "Ancient Ruin (Runtuhan Kuno)",
+    ["Underwater City"] = "Underwater City (Kota Atlantis)",
+    ["Desolate Deep"] = "Desolate Deep (Palung Terdalam)",
+    ["Roslit Bay"] = "Roslit Bay (Teluk Roslit)",
+    ["Mushgrove Swamp"] = "Mushgrove Swamp (Rawa Jamur)",
+    ["Terrapin Island"] = "Terrapin Island (Pulau Kura-kura)",
+    ["Sunstone Island"] = "Sunstone Island (Pulau Matahari)",
+    ["Statue of Sovereignty"] = "Statue of Sovereignty (Patung Raja)",
+    ["Keepers Altar"] = "Keepers Altar (Altar Penjaga)",
+    ["Snowcap Island"] = "Snowcap Island (Pulau Salju)",
+    ["Forsaken Shores"] = "Forsaken Shores (Pantai Terabaikan)"
+}
+
 local trackedPlayers = {}
 local UIStatus_PlayerMon
 local trackerUIPaused = false
 
 local function GetPlayerLocation(targetPlayer)
-    local char = targetPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    
+    local char = targetPlayer.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return "Loading/Mati" end
 
-    local closestName = nil
-    local minDist = math.huge
-
+    local closestName = nil; local minDist = math.huge
     local mapFolders = {"Zones", "Islands", "Map", "World", "Locations"}
+    
     for _, folderName in ipairs(mapFolders) do
         local folder = workspace:FindFirstChild(folderName)
         if folder then
             for _, child in ipairs(folder:GetChildren()) do
-                local pos = nil
-                if child:IsA("Model") then
-                    pos = child:GetPivot().Position
-                elseif child:IsA("BasePart") then
-                    pos = child.Position
-                end
-
+                local pos = child:IsA("Model") and child:GetPivot().Position or (child:IsA("BasePart") and child.Position or nil)
                 if pos then
                     local dist = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude
-                    if dist < minDist then 
-                        minDist = dist 
-                        closestName = child.Name 
-                    end
+                    if dist < minDist then minDist = dist; closestName = child.Name end
                 end
             end
         end
     end
 
     if closestName and minDist <= 3500 then 
-        return closestName 
+        return MapDictionary[closestName] or closestName 
     end
-
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterDescendantsInstances = {char}
-    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-
-    local rayResult = workspace:Raycast(hrp.Position, Vector3.new(0, -1000, 0), raycastParams)
-    if rayResult and rayResult.Instance then
-        local current = rayResult.Instance
-        local blacklist = {["!!! DEPENDENCIES"] = true, ["Terrain"] = true, ["Workspace"] = true, ["Water"] = true, ["Baseplate"] = true}
-        
-        while current and current ~= workspace do
-            local parentObj = current.Parent
-            if parentObj then
-                local pName = parentObj.Name:lower()
-                if pName == "workspace" or pName:find("islands") or pName:find("zones") or pName:find("map") or pName:find("world") then
-                    if (current:IsA("Model") or current:IsA("Folder")) and not Players:GetPlayerFromCharacter(current) and not blacklist[current.Name] then
-                        return current.Name
-                    end
-                end
-            end
-            current = current.Parent
-        end
-    end
-
     return "Lautan Luas (Ocean)"
-end
-
-local function UpdatePlayerTracker()
-    local currentOnlineMap = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        currentOnlineMap[p.UserId] = true
-        local currentLocation = GetPlayerLocation(p)
-        if trackedPlayers[p.UserId] then
-            trackedPlayers[p.UserId].IsOnline = true; trackedPlayers[p.UserId].Location = currentLocation
-        else
-            trackedPlayers[p.UserId] = {Name = p.Name, DisplayName = p.DisplayName, IsOnline = true, Location = currentLocation}
-        end
-    end
-    for userId, data in pairs(trackedPlayers) do
-        if not currentOnlineMap[userId] then data.IsOnline = false end
-    end
 end
 
 local function SendPlayerList(isManual)
@@ -240,62 +202,81 @@ local function SendPlayerList(isManual)
         if UIStatus_PlayerMon then
             task.spawn(function()
                 trackerUIPaused = true
-                UIStatus_PlayerMon.Text = "Status: Link Webhook Kosong/Salah!"
+                UIStatus_PlayerMon.Text = "Status: Link Webhook Kosong!"
                 UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
-                task.wait(3)
-                trackerUIPaused = false
+                task.wait(3); trackerUIPaused = false
             end)
-        end
-        return
+        end return
     end
-
-    -- [UPDATE FIX PC] Membersihkan spasi atau enter tersembunyi dari copy-paste
     url = url:match("^%s*(.-)%s*$")
 
-    if isManual and UIStatus_PlayerMon then
-        UIStatus_PlayerMon.Text = "Status: Menembak Webhook..."
-        UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 200, 50)
+    if isManual and UIStatus_PlayerMon then 
+        UIStatus_PlayerMon.Text = "Menyiapkan Data..."
+        UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 200, 50) 
     end
 
-    UpdatePlayerTracker()
+    local currentOnlineMap = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        currentOnlineMap[p.UserId] = true
+        local loc = GetPlayerLocation(p)
+        if trackedPlayers[p.UserId] then 
+            trackedPlayers[p.UserId].IsOnline = true; trackedPlayers[p.UserId].Location = loc
+        else 
+            trackedPlayers[p.UserId] = {Name = p.Name, DisplayName = p.DisplayName, IsOnline = true, Location = loc} 
+        end
+    end
+    for userId, data in pairs(trackedPlayers) do 
+        if not currentOnlineMap[userId] then data.IsOnline = false end 
+    end
 
     local onlineCount = 0; local totalTracked = 0; local sortedList = {}
-    for userId, data in pairs(trackedPlayers) do table.insert(sortedList, data) end
-    table.sort(sortedList, function(a, b)
-        if a.IsOnline ~= b.IsOnline then return a.IsOnline end
-        return a.DisplayName:lower() < b.DisplayName:lower()
+    for _, data in pairs(trackedPlayers) do table.insert(sortedList, data) end
+    table.sort(sortedList, function(a, b) 
+        if a.IsOnline ~= b.IsOnline then return a.IsOnline end; 
+        return a.DisplayName:lower() < b.DisplayName:lower() 
     end)
 
     local playerLines = {}
     for i, data in ipairs(sortedList) do
-        totalTracked = totalTracked + 1
-        if data.IsOnline then onlineCount = onlineCount + 1 end
+        totalTracked = totalTracked + 1; if data.IsOnline then onlineCount = onlineCount + 1 end
         local icon = data.IsOnline and "🟢" or "🔴"
-        local locInfo = data.IsOnline and ("📍 " .. data.Location) or ("👻 Last Location: " .. data.Location)
+        local locInfo = data.IsOnline and ("📍 " .. data.Location) or ("👻 Last Loc: " .. data.Location)
         table.insert(playerLines, string.format("%s %d. %s (@%s) | %s", icon, i, data.DisplayName, data.Name, locInfo))
     end
 
-    local maxPlayer = Players.MaxPlayers
-    local disconnectedCount = totalTracked - onlineCount
-    local listText = table.concat(playerLines, "\n")
-    
-    if #listText > 1800 then listText = string.sub(listText, 1, 1800) .. "\n... (Daftar dipotong)" end
+    local embedChunks = {}; local currentChunk = ""
+    for _, line in ipairs(playerLines) do
+        if #currentChunk + #line > 900 then
+            table.insert(embedChunks, currentChunk); currentChunk = line .. "\n"
+        else
+            currentChunk = currentChunk .. line .. "\n"
+        end
+    end
+    if currentChunk ~= "" then table.insert(embedChunks, currentChunk) end
 
-    local wibTime = os.time() + (7 * 3600)
-    local tanggalWIB = os.date("!%d/%m/%y", wibTime); local jamWIB = os.date("!%H:%M:%S", wibTime)     
+    local maxPlayer = Players.MaxPlayers; local disconnectedCount = totalTracked - onlineCount
+    local wibTime = os.time() + (7 * 3600); local tglWIB = os.date("!%d/%m/%y", wibTime); local jamWIB = os.date("!%H:%M:%S", wibTime)     
+
+    local embedFields = {
+        {["name"] = "🕒 Waktu Laporan (WIB)", ["value"] = string.format("📅 **Tanggal:** %s\n⏰ **Jam:** %s", tglWIB, jamWIB), ["inline"] = false},
+        {["name"] = "📊 Ringkasan Server", ["value"] = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d", onlineCount, maxPlayer, disconnectedCount), ["inline"] = false}
+    }
+
+    if #embedChunks == 0 then
+        table.insert(embedFields, {["name"] = "👤 Player Database", ["value"] = "```\n[ Data Kosong ]\n```", ["inline"] = false})
+    else
+        for idx, chunkText in ipairs(embedChunks) do
+            local headerName = (idx == 1) and "👤 Player Database & Location Map" or ("👤 Player Database (Bagian " .. idx .. ")")
+            table.insert(embedFields, {["name"] = headerName, ["value"] = "```\n" .. chunkText .. "```", ["inline"] = false})
+        end
+    end
 
     local payload = {
-        ["content"] = "", -- [UPDATE FIX PC] Wajib ada untuk beberapa library HTTP PC
-        ["username"] = "Server Player Monitor",
+        ["username"] = "Shadow Tracker Premium",
         ["embeds"] = {{
-            ["title"] = isManual and "🛠️ [MANUAL TEST] Server Player Tracker" or "🌐 Server Player Tracker",
-            ["color"] = (disconnectedCount > 0) and 15158332 or 3066993,
-            ["fields"] = {
-                {["name"] = "🕒 Waktu Pengiriman (WIB)", ["value"] = string.format("📅 **Tanggal:** %s\n⏰ **Jam:** %s WIB", tanggalWIB, jamWIB), ["inline"] = false},
-                {["name"] = "📊 Ringkasan Populasi", ["value"] = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d\n📌 **Total Terdeteksi:** %d", onlineCount, maxPlayer, disconnectedCount, totalTracked), ["inline"] = false},
-                {["name"] = "👤 Daftar Player & Lokasi Map", ["value"] = totalTracked > 0 and ("```\n" .. listText .. "\n```") or "```\nTidak ada player\n```", ["inline"] = false}
-            },
-            -- [UPDATE FIX PC] Menggunakan os.date murni Lua menghindari gagal Encode JSON di PC
+            ["title"] = isManual and "🛠️ [TEST] SHADOW WEBHOOK TRACKER" or "🕸️ SHADOW WEBHOOK TRACKER",
+            ["color"] = 9371895,
+            ["fields"] = embedFields,
             ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ") 
         }}
     }
@@ -303,52 +284,18 @@ local function SendPlayerList(isManual)
     local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
     if requestFunc then
         task.spawn(function()
-            -- [UPDATE FIX PC] Dibungkus pcall agar PC tidak nge-log merah/force close jika API lemot
             local success, response = pcall(function()
-                return requestFunc({
-                    Url = url, 
-                    Method = "POST", 
-                    Headers = {["Content-Type"] = "application/json"}, 
-                    Body = HttpService:JSONEncode(payload)
-                })
+                return requestFunc({Url = url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(payload)})
             end)
-
             if success and response and (response.StatusCode == 200 or response.StatusCode == 204) then
                 if UIStatus_PlayerMon then
                     trackerUIPaused = true
-                    UIStatus_PlayerMon.Text = "Status: TEMBUS (Taruhan Anda Menang)!"
+                    UIStatus_PlayerMon.Text = "Status: TEMBUS (Sukses Kirim)!"
                     UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
-                    task.wait(3)
-                    trackerUIPaused = false
-                end
-            else
-                if UIStatus_PlayerMon then
-                    trackerUIPaused = true
-                    UIStatus_PlayerMon.Text = "Status: DITOLAK! Cek F9 (Saya Menang)"
-                    UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
-                    warn("=== ERROR WEBHOOK SHADOW HUB ===")
-                    if not success then
-                        warn("Client HTTP Terhenti (Pcall Catch): " .. tostring(response))
-                    else
-                        warn("Status Code: " .. tostring(response and response.StatusCode or "N/A"))
-                        warn("Body: " .. tostring(response and response.Body or "N/A"))
-                    end
-                    warn("==================================")
-                    task.wait(5)
-                    trackerUIPaused = false
+                    task.wait(3); trackerUIPaused = false
                 end
             end
         end)
-    else
-        if UIStatus_PlayerMon then
-            task.spawn(function()
-                trackerUIPaused = true
-                UIStatus_PlayerMon.Text = "Status: Executor Tidak Support!"
-                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
-                task.wait(3)
-                trackerUIPaused = false
-            end)
-        end
     end
 end
 
@@ -481,9 +428,10 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(40, 40, 50); MainFrame.UIStroke.Thickness = 1
 
 local LogoBtn = Instance.new("TextButton", ScreenGui)
-LogoBtn.Size = UDim2.new(0, 45, 0, 45); LogoBtn.Position = UDim2.new(0, 15, 0.35, 0)
-LogoBtn.BackgroundColor3 = c_sidebar; LogoBtn.Text = "S"; LogoBtn.TextColor3 = c_accent
-LogoBtn.Font = Enum.Font.GothamBlack; LogoBtn.TextSize = 22; LogoBtn.Active = true; LogoBtn.Draggable = true
+LogoBtn.Size = UDim2.new(0, 45, 0, 45) 
+LogoBtn.Position = UDim2.new(0, 15, 0.45, 0) -- Adjusted ke samping kiri sesuai gambar
+LogoBtn.BackgroundColor3 = c_sidebar; LogoBtn.Text = "SHDW\n🚀"; LogoBtn.TextColor3 = c_accent
+LogoBtn.Font = Enum.Font.GothamBlack; LogoBtn.TextSize = 11; LogoBtn.Active = true; LogoBtn.Draggable = true
 LogoBtn.Visible = false
 Instance.new("UICorner", LogoBtn).CornerRadius = UDim.new(0, 10)
 
@@ -491,8 +439,8 @@ local Header = Instance.new("Frame", MainFrame)
 Header.Size = UDim2.new(1, 0, 0, 40); Header.BackgroundTransparency = 1
 
 local TitleLabel = Instance.new("TextLabel", Header)
-TitleLabel.Size = UDim2.new(0.4, 0, 1, 0); TitleLabel.Position = UDim2.new(0, 15, 0, 0)
-TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "SHADOW HUB V8"; TitleLabel.TextColor3 = c_accent
+TitleLabel.Size = UDim2.new(0.6, 0, 1, 0); TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "⚜️ SHADOW HUB 🚀"; TitleLabel.TextColor3 = c_accent
 TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.TextSize = 13; TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local CloseBtn = Instance.new("TextButton", Header)
@@ -724,7 +672,7 @@ CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL
 local DropWebToggles = CreateDropdown(TabWebhooks, "⚙️ Active Webhook Features")
 UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles)
 
-local trackerInterval = 1500
+local trackerInterval = 3600
 local trackerRemaining = 0
 local isTrackerActive = false
 
