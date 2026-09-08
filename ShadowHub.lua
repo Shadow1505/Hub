@@ -28,7 +28,6 @@ local DefaultConfig = {
     AntiAFK = true,
     WebhookURL = "",
     WebhookPlayer = false,
-    UsePCProxy = false, 
     UISizeX = 520,
     UISizeY = 320
 }
@@ -138,7 +137,7 @@ local function PulangKeSetPos()
 end
 
 -- ========================================================
--- 3. ENGINE WEBHOOK & PLAYER TRACKER
+-- 3. ENGINE WEBHOOK & PLAYER TRACKER (AKURASI MAP DIPERBARUI)
 -- ========================================================
 local trackedPlayers = {}
 local UIStatus_PlayerMon
@@ -224,13 +223,7 @@ end
 
 local function SendPlayerList(isManual)
     local url = ConfigData.WebhookURL
-    
-    if ConfigData.UsePCProxy and url then
-        url = string.gsub(url, "discord%.com/api", "hooks.hyra.io/api")
-        url = string.gsub(url, "discordapp%.com/api", "hooks.hyra.io/api")
-    end
-    
-    if not url or url == "" or (not string.find(url, "discord") and not string.find(url, "hyra")) then
+    if not url or url == "" or not string.find(url, "discord") then
         if UIStatus_PlayerMon then
             task.spawn(function()
                 trackerUIPaused = true
@@ -244,7 +237,7 @@ local function SendPlayerList(isManual)
     end
 
     if isManual and UIStatus_PlayerMon then
-        UIStatus_PlayerMon.Text = "Status: Mengumpulkan Data..."
+        UIStatus_PlayerMon.Text = "Status: Menembak Webhook..."
         UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 200, 50)
     end
 
@@ -262,77 +255,78 @@ local function SendPlayerList(isManual)
         totalTracked = totalTracked + 1
         if data.IsOnline then onlineCount = onlineCount + 1 end
         local icon = data.IsOnline and "🟢" or "🔴"
-        local locInfo = data.IsOnline and ("📍 " .. data.Location) or ("👻 Last: " .. data.Location)
+        local locInfo = data.IsOnline and ("📍 " .. data.Location) or ("👻 Last Location: " .. data.Location)
         table.insert(playerLines, string.format("%s %d. %s (@%s) | %s", icon, i, data.DisplayName, data.Name, locInfo))
     end
 
     local maxPlayer = Players.MaxPlayers; local disconnectedCount = totalTracked - onlineCount
     local listText = table.concat(playerLines, "\n")
     
-    -- LIMIT MUTLAK DISCORD: Dipotong di 950 agar aman dari limit 1024 karakter
-    if #listText > 950 then 
-        listText = string.sub(listText, 1, 950) .. "\n... (Daftar Terlalu Panjang, Dipotong)" 
-    end
+    -- MENGGUNAKAN BATAS 1800 SESUAI PERMINTAAN TARUHAN
+    if #listText > 1800 then listText = string.sub(listText, 1, 1800) .. "\n... (Daftar dipotong)" end
 
     local wibTime = os.time() + (7 * 3600)
     local tanggalWIB = os.date("!%d/%m/%y", wibTime); local jamWIB = os.date("!%H:%M:%S", wibTime)     
 
+    -- MENGGUNAKAN JSON PAKSA (["key"]) DAN DATETIME (TARUHAN)
     local payload = {
-        username = "Server Player Monitor",
-        embeds = {{
-            title = isManual and "🛠️ [MANUAL TEST] Server Player Tracker" or "🌐 Server Player Tracker",
-            color = (disconnectedCount > 0) and 15158332 or 3066993,
-            fields = {
-                {name = "🕒 Waktu Pengiriman (WIB)", value = string.format("📅 **Tanggal:** %s\n⏰ **Jam:** %s WIB", tanggalWIB, jamWIB), inline = false},
-                {name = "📊 Ringkasan Populasi", value = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d", onlineCount, maxPlayer, disconnectedCount), inline = false},
-                {name = "👤 Daftar Player & Lokasi Map", value = totalTracked > 0 and ("```\n" .. listText .. "\n```") or "```\nTidak ada player\n```", inline = false}
+        ["username"] = "Server Player Monitor",
+        ["embeds"] = {{
+            ["title"] = isManual and "🛠️ [MANUAL TEST] Server Player Tracker" or "🌐 Server Player Tracker",
+            ["color"] = (disconnectedCount > 0) and 15158332 or 3066993,
+            ["fields"] = {
+                {["name"] = "🕒 Waktu Pengiriman (WIB)", ["value"] = string.format("📅 **Tanggal:** %s\n⏰ **Jam:** %s WIB", tanggalWIB, jamWIB), ["inline"] = false},
+                {["name"] = "📊 Ringkasan Populasi", ["value"] = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d\n📌 **Total Terdeteksi:** %d", onlineCount, maxPlayer, disconnectedCount, totalTracked), ["inline"] = false},
+                {["name"] = "👤 Daftar Player & Lokasi Map", ["value"] = totalTracked > 0 and ("```\n" .. listText .. "\n```") or "```\nTidak ada player\n```", ["inline"] = false}
             },
-            timestamp = DateTime.now():ToIsoDate()
+            ["timestamp"] = DateTime.now():ToIsoDate() -- INI PENENTUAN
         }}
     }
 
     local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    
-    task.spawn(function()
-        local success, response = pcall(function()
-            if requestFunc then
-                return requestFunc({
-                    Url = url, 
-                    Method = "POST", 
-                    Headers = {["Content-Type"] = "application/json"}, 
-                    Body = HttpService:JSONEncode(payload)
-                })
+    if requestFunc then
+        task.spawn(function()
+            -- BUKA SEGEL PCALL AGAR BISA TERIAK DI F9
+            local response = requestFunc({
+                Url = url, 
+                Method = "POST", 
+                Headers = {["Content-Type"] = "application/json"}, 
+                Body = HttpService:JSONEncode(payload)
+            })
+
+            if response and (response.StatusCode == 200 or response.StatusCode == 204) then
+                if UIStatus_PlayerMon then
+                    trackerUIPaused = true
+                    UIStatus_PlayerMon.Text = "Status: TEMBUS (Taruhan Anda Menang)!"
+                    UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
+                    task.wait(3)
+                    trackerUIPaused = false
+                end
             else
-                HttpService:PostAsync(url, HttpService:JSONEncode(payload), Enum.HttpContentType.ApplicationJson, false)
-                return {StatusCode = 200, Body = "Fallback PostAsync Success"}
+                if UIStatus_PlayerMon then
+                    trackerUIPaused = true
+                    UIStatus_PlayerMon.Text = "Status: DITOLAK! Cek F9 (Saya Menang)"
+                    UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
+                    warn("=== ERROR WEBHOOK SHADOW HUB ===")
+                    warn("Status Code: " .. tostring(response and response.StatusCode or "N/A"))
+                    warn("Body: " .. tostring(response and response.Body or "N/A"))
+                    warn("==================================")
+                    task.wait(5)
+                    trackerUIPaused = false
+                end
             end
         end)
-
-        if success and response and (response.StatusCode == 200 or response.StatusCode == 204) then
-            if UIStatus_PlayerMon then
+    else
+        if UIStatus_PlayerMon then
+            task.spawn(function()
                 trackerUIPaused = true
-                UIStatus_PlayerMon.Text = "Status: " .. (isManual and "Test Manual Terkirim!" or "Auto Data Terkirim!")
-                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
+                UIStatus_PlayerMon.Text = "Status: Executor Tidak Support!"
+                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
                 task.wait(3)
                 trackerUIPaused = false
-            end
-        else
-            if UIStatus_PlayerMon then
-                trackerUIPaused = true
-                UIStatus_PlayerMon.Text = "Status: GAGAL! Tekan F9"
-                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
-                
-                if response and type(response) == "table" then
-                    warn("[SHADOW HUB WEBHOOK ERROR] Code: " .. tostring(response.StatusCode) .. " | Reason: " .. tostring(response.Body))
-                else
-                    warn("[SHADOW HUB WEBHOOK ERROR] Executor tidak mengizinkan HTTP Request atau limit memblokir eksekusi.")
-                end
-                
-                task.wait(5)
-                trackerUIPaused = false
-            end
+            end)
         end
-    end)
+    end
 end
 
 -- ========================================================
@@ -573,7 +567,6 @@ CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state) end)
 
 local DropGlobalWeb = CreateDropdown(TabWebhooks, "🔗 Global Webhook Configuration")
 CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL", function(txt) end)
-CreateToggle(DropGlobalWeb, "Proxy Webhook Discord (Khusus PC)", "UsePCProxy", function(state) end) 
 
 local DropWebToggles = CreateDropdown(TabWebhooks, "⚙️ Active Webhook Features")
 UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles)
@@ -624,10 +617,7 @@ task.spawn(function()
                 if not trackerUIPaused and UIStatus_PlayerMon then
                     local menit = math.floor(trackerRemaining / 60)
                     local detik = trackerRemaining % 60
-                    
-                    local proxyLabel = ConfigData.UsePCProxy and "[PROXY PC ON] " or ""
-                    
-                    UIStatus_PlayerMon.Text = proxyLabel .. string.format("TRACKER AKTIF : NEXT %02d:%02d", menit, detik)
+                    UIStatus_PlayerMon.Text = string.format("TRACKER AKTIF : NEXT SEND %02d:%02d", menit, detik)
                     UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(50, 255, 100)
                 end
             end
