@@ -28,7 +28,7 @@ local DefaultConfig = {
     AntiAFK = true,
     WebhookURL = "",
     WebhookPlayer = false,
-    UsePCProxy = false, -- [UPDATE] Konfigurasi baru untuk Proxy PC
+    UsePCProxy = false, 
     UISizeX = 520,
     UISizeY = 320
 }
@@ -138,7 +138,7 @@ local function PulangKeSetPos()
 end
 
 -- ========================================================
--- 3. ENGINE WEBHOOK & PLAYER TRACKER (AKURASI MAP DIPERBARUI)
+-- 3. ENGINE WEBHOOK & PLAYER TRACKER
 -- ========================================================
 local trackedPlayers = {}
 local UIStatus_PlayerMon
@@ -153,7 +153,6 @@ local function GetPlayerLocation(targetPlayer)
     local closestName = nil
     local minDist = math.huge
 
-    -- 1. Metode Utama: Deteksi Koordinat Horizontal (Kebal Map Bawah Tanah)
     local mapFolders = {"Zones", "Islands", "Map", "World", "Locations"}
     for _, folderName in ipairs(mapFolders) do
         local folder = workspace:FindFirstChild(folderName)
@@ -167,7 +166,6 @@ local function GetPlayerLocation(targetPlayer)
                 end
 
                 if pos then
-                    -- Mengabaikan sumbu Y agar Crystalline Passage tidak membajak Ancient Ruin
                     local dist = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude
                     if dist < minDist then 
                         minDist = dist 
@@ -182,7 +180,6 @@ local function GetPlayerLocation(targetPlayer)
         return closestName 
     end
 
-    -- 2. Fallback: Raycast Klasik
     local raycastParams = RaycastParams.new()
     raycastParams.FilterDescendantsInstances = {char}
     raycastParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -228,14 +225,12 @@ end
 local function SendPlayerList(isManual)
     local url = ConfigData.WebhookURL
     
-    -- [UPDATE] Implementasi sistem Bypass Proxy PC
     if ConfigData.UsePCProxy and url then
-        url = string.gsub(url, "discord%.com", "webhook.lewisakura.moe")
-        url = string.gsub(url, "discordapp%.com", "webhook.lewisakura.moe")
+        url = string.gsub(url, "discord%.com/api", "hooks.hyra.io/api")
+        url = string.gsub(url, "discordapp%.com/api", "hooks.hyra.io/api")
     end
     
-    -- [UPDATE] Pengecualian deteksi agar proxy lolos sistem filter
-    if not url or url == "" or (not string.find(url, "discord") and not string.find(url, "lewisakura")) then
+    if not url or url == "" or (not string.find(url, "discord") and not string.find(url, "hyra")) then
         if UIStatus_PlayerMon then
             task.spawn(function()
                 trackerUIPaused = true
@@ -267,13 +262,17 @@ local function SendPlayerList(isManual)
         totalTracked = totalTracked + 1
         if data.IsOnline then onlineCount = onlineCount + 1 end
         local icon = data.IsOnline and "🟢" or "🔴"
-        local locInfo = data.IsOnline and ("📍 " .. data.Location) or ("👻 Last Location: " .. data.Location)
+        local locInfo = data.IsOnline and ("📍 " .. data.Location) or ("👻 Last: " .. data.Location)
         table.insert(playerLines, string.format("%s %d. %s (@%s) | %s", icon, i, data.DisplayName, data.Name, locInfo))
     end
 
     local maxPlayer = Players.MaxPlayers; local disconnectedCount = totalTracked - onlineCount
     local listText = table.concat(playerLines, "\n")
-    if #listText > 1800 then listText = string.sub(listText, 1, 1800) .. "\n... (Daftar dipotong)" end
+    
+    -- LIMIT MUTLAK DISCORD: Dipotong di 950 agar aman dari limit 1024 karakter
+    if #listText > 950 then 
+        listText = string.sub(listText, 1, 950) .. "\n... (Daftar Terlalu Panjang, Dipotong)" 
+    end
 
     local wibTime = os.time() + (7 * 3600)
     local tanggalWIB = os.date("!%d/%m/%y", wibTime); local jamWIB = os.date("!%H:%M:%S", wibTime)     
@@ -285,7 +284,7 @@ local function SendPlayerList(isManual)
             color = (disconnectedCount > 0) and 15158332 or 3066993,
             fields = {
                 {name = "🕒 Waktu Pengiriman (WIB)", value = string.format("📅 **Tanggal:** %s\n⏰ **Jam:** %s WIB", tanggalWIB, jamWIB), inline = false},
-                {name = "📊 Ringkasan Populasi", value = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d\n📌 **Total Terdeteksi:** %d", onlineCount, maxPlayer, disconnectedCount, totalTracked), inline = false},
+                {name = "📊 Ringkasan Populasi", value = string.format("🟢 **Online:** %d / %d\n🔴 **Disconnected:** %d", onlineCount, maxPlayer, disconnectedCount), inline = false},
                 {name = "👤 Daftar Player & Lokasi Map", value = totalTracked > 0 and ("```\n" .. listText .. "\n```") or "```\nTidak ada player\n```", inline = false}
             },
             timestamp = DateTime.now():ToIsoDate()
@@ -293,34 +292,47 @@ local function SendPlayerList(isManual)
     }
 
     local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
-    if requestFunc then
-        task.spawn(function()
-            pcall(function()
-                requestFunc({Url = url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(payload)})
-            end)
+    
+    task.spawn(function()
+        local success, response = pcall(function()
+            if requestFunc then
+                return requestFunc({
+                    Url = url, 
+                    Method = "POST", 
+                    Headers = {["Content-Type"] = "application/json"}, 
+                    Body = HttpService:JSONEncode(payload)
+                })
+            else
+                HttpService:PostAsync(url, HttpService:JSONEncode(payload), Enum.HttpContentType.ApplicationJson, false)
+                return {StatusCode = 200, Body = "Fallback PostAsync Success"}
+            end
         end)
-        
-        if UIStatus_PlayerMon then
-            task.spawn(function()
+
+        if success and response and (response.StatusCode == 200 or response.StatusCode == 204) then
+            if UIStatus_PlayerMon then
                 trackerUIPaused = true
-                local statusTeks = isManual and "Test Manual Terkirim!" or "Auto Data Terkirim!"
-                UIStatus_PlayerMon.Text = "Status: " .. statusTeks
+                UIStatus_PlayerMon.Text = "Status: " .. (isManual and "Test Manual Terkirim!" or "Auto Data Terkirim!")
                 UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
                 task.wait(3)
                 trackerUIPaused = false
-            end)
-        end
-    else
-        if UIStatus_PlayerMon then
-            task.spawn(function()
+            end
+        else
+            if UIStatus_PlayerMon then
                 trackerUIPaused = true
-                UIStatus_PlayerMon.Text = "Status: Executor Tidak Support!"
+                UIStatus_PlayerMon.Text = "Status: GAGAL! Tekan F9"
                 UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
-                task.wait(3)
+                
+                if response and type(response) == "table" then
+                    warn("[SHADOW HUB WEBHOOK ERROR] Code: " .. tostring(response.StatusCode) .. " | Reason: " .. tostring(response.Body))
+                else
+                    warn("[SHADOW HUB WEBHOOK ERROR] Executor tidak mengizinkan HTTP Request atau limit memblokir eksekusi.")
+                end
+                
+                task.wait(5)
                 trackerUIPaused = false
-            end)
+            end
         end
-    end
+    end)
 end
 
 -- ========================================================
@@ -561,7 +573,6 @@ CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state) end)
 
 local DropGlobalWeb = CreateDropdown(TabWebhooks, "🔗 Global Webhook Configuration")
 CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL", function(txt) end)
--- [UPDATE] Toggle diletakkan pada menu Webhooks untuk mengaktifkan Proxy PC
 CreateToggle(DropGlobalWeb, "Proxy Webhook Discord (Khusus PC)", "UsePCProxy", function(state) end) 
 
 local DropWebToggles = CreateDropdown(TabWebhooks, "⚙️ Active Webhook Features")
@@ -613,7 +624,10 @@ task.spawn(function()
                 if not trackerUIPaused and UIStatus_PlayerMon then
                     local menit = math.floor(trackerRemaining / 60)
                     local detik = trackerRemaining % 60
-                    UIStatus_PlayerMon.Text = string.format("TRACKER AKTIF : NEXT SEND %02d:%02d", menit, detik)
+                    
+                    local proxyLabel = ConfigData.UsePCProxy and "[PROXY PC ON] " or ""
+                    
+                    UIStatus_PlayerMon.Text = proxyLabel .. string.format("TRACKER AKTIF : NEXT %02d:%02d", menit, detik)
                     UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(50, 255, 100)
                 end
             end
