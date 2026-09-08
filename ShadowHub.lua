@@ -150,7 +150,7 @@ local function PulangKeSetPos()
 end
 
 -- ========================================================
--- 3. ENGINE WEBHOOK & PLAYER TRACKER
+-- 3. ENGINE WEBHOOK & PLAYER TRACKER (LOGIKA DARI SCRIPT TRACKER)
 -- ========================================================
 local trackedPlayers = {}
 local UIStatus_PlayerMon
@@ -307,7 +307,7 @@ local function SendPlayerList(isManual)
             if response and (response.StatusCode == 200 or response.StatusCode == 204) then
                 if UIStatus_PlayerMon then
                     trackerUIPaused = true
-                    UIStatus_PlayerMon.Text = "Status: TEMBUS!"
+                    UIStatus_PlayerMon.Text = "Status: TEMBUS (Taruhan Anda Menang)!"
                     UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(100, 255, 100)
                     task.wait(3)
                     trackerUIPaused = false
@@ -315,13 +315,27 @@ local function SendPlayerList(isManual)
             else
                 if UIStatus_PlayerMon then
                     trackerUIPaused = true
-                    UIStatus_PlayerMon.Text = "Status: DITOLAK! Cek F9"
+                    UIStatus_PlayerMon.Text = "Status: DITOLAK! Cek F9 (Saya Menang)"
                     UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
+                    warn("=== ERROR WEBHOOK SHADOW HUB ===")
+                    warn("Status Code: " .. tostring(response and response.StatusCode or "N/A"))
+                    warn("Body: " .. tostring(response and response.Body or "N/A"))
+                    warn("==================================")
                     task.wait(5)
                     trackerUIPaused = false
                 end
             end
         end)
+    else
+        if UIStatus_PlayerMon then
+            task.spawn(function()
+                trackerUIPaused = true
+                UIStatus_PlayerMon.Text = "Status: Executor Tidak Support!"
+                UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(255, 100, 100)
+                task.wait(3)
+                trackerUIPaused = false
+            end)
+        end
     end
 end
 
@@ -881,7 +895,7 @@ task.spawn(function()
                     local subTimer = 0
                     while subTimer < rotateInterval and map1Timer < dualMapInterval and ConfigData.AutoDualMap do
                         local sisaPindah = dualMapInterval - map1Timer
-                        UIStatus_DualMap.Text = string.format("MAP 1 (ROTATING) | SWITCH IN: %ds", sisaPindah)
+                        UIStatus_DualMap.Text = "MAP 1 (ROTATING) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
                         UIStatus_DualMap.TextColor3 = Color3.fromRGB(100, 200, 255)
                         task.wait(1)
                         subTimer = subTimer + 1
@@ -911,7 +925,7 @@ task.spawn(function()
                     end
 
                     local sisaPindah = dualMapInterval - map2Timer
-                    UIStatus_DualMap.Text = string.format("MAP 2 (ROTATE OFF) | SWITCH IN: %ds", sisaPindah)
+                    UIStatus_DualMap.Text = "MAP 2 (ROTATE OFF) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
                     UIStatus_DualMap.TextColor3 = Color3.fromRGB(255, 200, 50)
                     task.wait(1)
                     map2Timer = map2Timer + 1
