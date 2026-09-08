@@ -28,6 +28,7 @@ local DefaultConfig = {
     AntiAFK = true,
     WebhookURL = "",
     WebhookPlayer = false,
+    UsePCProxy = false, -- [UPDATE] Konfigurasi baru untuk Proxy PC
     UISizeX = 520,
     UISizeY = 320
 }
@@ -226,7 +227,15 @@ end
 
 local function SendPlayerList(isManual)
     local url = ConfigData.WebhookURL
-    if not url or url == "" or not string.find(url, "discord") then
+    
+    -- [UPDATE] Implementasi sistem Bypass Proxy PC
+    if ConfigData.UsePCProxy and url then
+        url = string.gsub(url, "discord%.com", "webhook.lewisakura.moe")
+        url = string.gsub(url, "discordapp%.com", "webhook.lewisakura.moe")
+    end
+    
+    -- [UPDATE] Pengecualian deteksi agar proxy lolos sistem filter
+    if not url or url == "" or (not string.find(url, "discord") and not string.find(url, "lewisakura")) then
         if UIStatus_PlayerMon then
             task.spawn(function()
                 trackerUIPaused = true
@@ -552,6 +561,8 @@ CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state) end)
 
 local DropGlobalWeb = CreateDropdown(TabWebhooks, "🔗 Global Webhook Configuration")
 CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL", function(txt) end)
+-- [UPDATE] Toggle diletakkan pada menu Webhooks untuk mengaktifkan Proxy PC
+CreateToggle(DropGlobalWeb, "Proxy Webhook Discord (Khusus PC)", "UsePCProxy", function(state) end) 
 
 local DropWebToggles = CreateDropdown(TabWebhooks, "⚙️ Active Webhook Features")
 UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles)
