@@ -31,6 +31,7 @@ local DefaultConfig = {
     AntiAFK = true,
     WebhookURL = "",
     WebhookPlayer = false,
+    WebhookJoinLeave = false, -- Toggle khusus Alert Join/Leave
     UISizeX = 520,
     UISizeY = 320
 }
@@ -86,8 +87,8 @@ local map2Degree = 46.85
 local map2CFrame = CFrame.new(map2Pos) * CFrame.Angles(0, math.rad(map2Degree), 0)
 
 -- TIMING CONFIGURATION (REAL TIME)
-local rotateInterval = 1200     -- 1 Jam (3600 detik) dibagi 3 kolam = 20 Menit (1200 detik) per kolam
-local dualMapInterval = 3600    -- Pindah map setiap 1 Jam (3600 detik)
+local rotateInterval = 1200     -- 20 Menit per kolam
+local dualMapInterval = 3600    -- 1 Jam switch map
 
 local function GetEventScheduleWIB()
     local utc_time = os.time()
@@ -150,7 +151,7 @@ local function PulangKeSetPos()
 end
 
 -- ========================================================
--- 3. ENGINE WEBHOOK & PLAYER TRACKER (DIUPDATE DARI TESTING 2)
+-- 3. ENGINE WEBHOOK & PLAYER TRACKER
 -- ========================================================
 local MapDictionary = {
     ["Crystalline Passage"] = "Ancient Ruin (Runtuhan Kuno)",
@@ -166,9 +167,26 @@ local MapDictionary = {
     ["Forsaken Shores"] = "Forsaken Shores (Pantai Terabaikan)"
 }
 
+-- Kata kunci blacklist untuk menyaring toko, box, teleporter, dan leaderboard
+local BlacklistKeywords = {
+    "crate", "teleport", "stand", "board", "shop", "vendor", "seller", 
+    "buy", "leaderboard", "npc", "rod", "throne"
+}
+
+local function IsBlacklistedLocation(name)
+    local lowerName = string.lower(name)
+    for _, kw in ipairs(BlacklistKeywords) do
+        if string.find(lowerName, kw) then
+            return true
+        end
+    end
+    return false
+end
+
 local trackedPlayers = {}
 local UIStatus_PlayerMon
 local trackerUIPaused = false
+local isTrackerActive = false
 
 local function GetPlayerLocation(targetPlayer)
     local char = targetPlayer.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -181,10 +199,13 @@ local function GetPlayerLocation(targetPlayer)
         local folder = workspace:FindFirstChild(folderName)
         if folder then
             for _, child in ipairs(folder:GetChildren()) do
-                local pos = child:IsA("Model") and child:GetPivot().Position or (child:IsA("BasePart") and child.Position or nil)
-                if pos then
-                    local dist = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude
-                    if dist < minDist then minDist = dist; closestName = child.Name end
+                -- Abaikan jika objek terdeteksi masuk daftar blacklist
+                if not IsBlacklistedLocation(child.Name) then
+                    local pos = child:IsA("Model") and child:GetPivot().Position or (child:IsA("BasePart") and child.Position or nil)
+                    if pos then
+                        local dist = (Vector3.new(hrp.Position.X, 0, hrp.Position.Z) - Vector3.new(pos.X, 0, pos.Z)).Magnitude
+                        if dist < minDist then minDist = dist; closestName = child.Name end
+                    end
                 end
             end
         end
@@ -298,6 +319,61 @@ local function SendPlayerList(isManual)
         end)
     end
 end
+
+-- ========================================================
+-- 3.5. PLAYER JOIN / LEAVE ALERT (MENGGUNAKAN TOGGLE CONFIG)
+-- ========================================================
+local function SendJoinLeaveNotification(targetPlayer, isJoin)
+    local url = ConfigData.WebhookURL
+    if not url or url == "" or not string.find(url, "discord") then return end
+    if not ConfigData.WebhookJoinLeave then return end -- Hanya aktif jika Toggle UI bernilai ON
+
+    url = url:match("^%s*(.-)%s*$")
+    
+    local statusText = isJoin and "🟢 JOINED THE SERVER" or "🔴 LEFT THE SERVER"
+    local colorCode = isJoin and 3066993 or 15158332
+    
+    local function FireWebhook(locationText)
+        local payload = {
+            ["username"] = "Shadow Tracker Alerts",
+            ["embeds"] = {{
+                ["title"] = "🔔 PLAYER ACTIVITY ALERT",
+                ["color"] = colorCode,
+                ["fields"] = {
+                    {["name"] = "👤 Player", ["value"] = string.format("**%s**\n(@%s)", targetPlayer.DisplayName, targetPlayer.Name), ["inline"] = true},
+                    {["name"] = "📊 Action", ["value"] = statusText, ["inline"] = true},
+                    {["name"] = "📍 Location", ["value"] = locationText, ["inline"] = false}
+                },
+                ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }}
+        }
+        
+        local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+        if requestFunc then
+            task.spawn(function()
+                pcall(function()
+                    requestFunc({Url = url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(payload)})
+                end)
+            end)
+        end
+    end
+
+    if isJoin then
+        task.delay(4, function()
+            local loc = GetPlayerLocation(targetPlayer)
+            FireWebhook(loc)
+        end)
+    else
+        local loc = "Lautan Luas (Ocean)"
+        if trackedPlayers[targetPlayer.UserId] then
+            loc = "Last Loc: " .. trackedPlayers[targetPlayer.UserId].Location
+        end
+        FireWebhook(loc)
+    end
+end
+
+Players.PlayerAdded:Connect(function(p) SendJoinLeaveNotification(p, true) end)
+Players.PlayerRemoving:Connect(function(p) SendJoinLeaveNotification(p, false) end)
 
 -- ========================================================
 -- 4. ENGINE CLAY POTATO MODE + ALWAYS DAYLIGHT
@@ -429,7 +505,7 @@ Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(40, 40, 50); MainFram
 
 local LogoBtn = Instance.new("TextButton", ScreenGui)
 LogoBtn.Size = UDim2.new(0, 45, 0, 45) 
-LogoBtn.Position = UDim2.new(0, 15, 0.45, 0) -- Adjusted ke samping kiri sesuai gambar
+LogoBtn.Position = UDim2.new(0, 15, 0.45, 0)
 LogoBtn.BackgroundColor3 = c_sidebar; LogoBtn.Text = "SHDW\n🚀"; LogoBtn.TextColor3 = c_accent
 LogoBtn.Font = Enum.Font.GothamBlack; LogoBtn.TextSize = 11; LogoBtn.Active = true; LogoBtn.Draggable = true
 LogoBtn.Visible = false
@@ -674,7 +750,6 @@ UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles)
 
 local trackerInterval = 3600
 local trackerRemaining = 0
-local isTrackerActive = false
 
 CreateToggle(DropWebToggles, "Enable Player Tracker", "WebhookPlayer", function(state)
     isTrackerActive = state
@@ -691,6 +766,9 @@ CreateToggle(DropWebToggles, "Enable Player Tracker", "WebhookPlayer", function(
         trackerRemaining = trackerInterval
     end
 end)
+
+-- TOGGLE BARU UNTUK PLAYER JOIN/LEAVE ALERT WITH SAVE TOGGLE
+CreateToggle(DropWebToggles, "Enable Player Join/Leave Alert", "WebhookJoinLeave", function(state) end)
 
 local DropWebTest = CreateDropdown(TabWebhooks, "🧪 Test Webhook Triggers")
 CreateButton(DropWebTest, "🚀 Kirim Test Player Tracker Manual", function() SendPlayerList(true) end)
