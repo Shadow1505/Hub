@@ -19,11 +19,13 @@ local UI_Updaters = {}
 
 local DefaultConfig = {
     AutoTP = false,
-    AutoRotate = false,   -- Feature 1: Mancing Map 1
-    AutoMap2 = false,     -- Feature 2: Mancing Map 2
-    AutoDualMap = false,  -- Feature 3: Auto Switch Map 1 & Map 2
+    AutoFishingToggle = false,
+    SelectedFarmingMode = "Map 1 (Rotate)",
+    AutoRotate = false,
+    AutoMap2 = false,
+    AutoDualMap = false,
     FPSBooster = false,
-    ClayPotato = false,   -- Feature 4: Clay Potato Mode + Always Daylight
+    ClayPotato = false,
     Disable3D = false,
     ClearWater = false,
     Limit30FPS = false,
@@ -31,7 +33,7 @@ local DefaultConfig = {
     AntiAFK = true,
     WebhookURL = "",
     WebhookPlayer = false,
-    WebhookJoinLeave = false, -- Toggle khusus Alert Join/Leave
+    WebhookJoinLeave = false,
     UISizeX = 520,
     UISizeY = 320
 }
@@ -76,19 +78,16 @@ local spotKordinat = {
 local DatabaseIconCuaca = {["118379404229807"] = "Blizzard", ["105076841543450"] = "Storm", ["76632496002371"] = "Volcano"}
 local posisiSimpanan = nil
 
--- DATA MAP 1
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
 local currentPoolIndex = 1
 
--- DATA MAP 2 (Tambang Canyon Tembaga)
 local map2Pos = Vector3.new(-4014.58, -543.00, 564.95)
 local map2Degree = 46.85
 local map2CFrame = CFrame.new(map2Pos) * CFrame.Angles(0, math.rad(map2Degree), 0)
 
--- TIMING CONFIGURATION (REAL TIME)
-local rotateInterval = 1200     -- 20 Menit per kolam
-local dualMapInterval = 3600    -- 1 Jam switch map
+local rotateInterval = 1200
+local dualMapInterval = 3600
 
 local function GetEventScheduleWIB()
     local utc_time = os.time()
@@ -167,7 +166,6 @@ local MapDictionary = {
     ["Forsaken Shores"] = "Forsaken Shores (Pantai Terabaikan)"
 }
 
--- Kata kunci blacklist untuk menyaring toko, box, teleporter, dan leaderboard
 local BlacklistKeywords = {
     "crate", "teleport", "stand", "board", "shop", "vendor", "seller", 
     "buy", "leaderboard", "npc", "rod", "throne"
@@ -176,9 +174,7 @@ local BlacklistKeywords = {
 local function IsBlacklistedLocation(name)
     local lowerName = string.lower(name)
     for _, kw in ipairs(BlacklistKeywords) do
-        if string.find(lowerName, kw) then
-            return true
-        end
+        if string.find(lowerName, kw) then return true end
     end
     return false
 end
@@ -186,7 +182,7 @@ end
 local trackedPlayers = {}
 local UIStatus_PlayerMon
 local trackerUIPaused = false
-local isTrackerActive = false
+local isTrackerActive = ConfigData.WebhookPlayer or false
 
 local function GetPlayerLocation(targetPlayer)
     local char = targetPlayer.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -199,7 +195,6 @@ local function GetPlayerLocation(targetPlayer)
         local folder = workspace:FindFirstChild(folderName)
         if folder then
             for _, child in ipairs(folder:GetChildren()) do
-                -- Abaikan jika objek terdeteksi masuk daftar blacklist
                 if not IsBlacklistedLocation(child.Name) then
                     local pos = child:IsA("Model") and child:GetPivot().Position or (child:IsA("BasePart") and child.Position or nil)
                     if pos then
@@ -321,12 +316,12 @@ local function SendPlayerList(isManual)
 end
 
 -- ========================================================
--- 3.5. PLAYER JOIN / LEAVE ALERT (MENGGUNAKAN TOGGLE CONFIG)
+-- 3.5. PLAYER JOIN / LEAVE ALERT 
 -- ========================================================
 local function SendJoinLeaveNotification(targetPlayer, isJoin)
     local url = ConfigData.WebhookURL
     if not url or url == "" or not string.find(url, "discord") then return end
-    if not ConfigData.WebhookJoinLeave then return end -- Hanya aktif jika Toggle UI bernilai ON
+    if not ConfigData.WebhookJoinLeave then return end
 
     url = url:match("^%s*(.-)%s*$")
     
@@ -385,7 +380,6 @@ local clayDescendantConn = nil
 local function EnableClayPotato()
     if clayPotatoActive then return end
     clayPotatoActive = true
-
     if setfpscap then pcall(setfpscap, 60) end
 
     local GRAY_COLOR = Color3.fromRGB(140, 140, 140)
@@ -410,30 +404,21 @@ local function EnableClayPotato()
     end
 
     for _, effect in ipairs(Lighting:GetChildren()) do
-        if effect:IsA("PostEffect") or effect:IsA("Atmosphere") then
-            pcall(function() effect:Destroy() end)
-        end
+        if effect:IsA("PostEffect") or effect:IsA("Atmosphere") then pcall(function() effect:Destroy() end) end
     end
 
     pcall(function()
         local terrain = workspace:FindFirstChildOfClass("Terrain")
         if terrain then
-            terrain.Decoration = false
-            terrain.WaterWaveSize = 0
-            terrain.WaterWaveSpeed = 0
-            terrain.WaterReflectance = 0
-            terrain.WaterTransparency = 0.8
+            terrain.Decoration = false; terrain.WaterWaveSize = 0; terrain.WaterWaveSpeed = 0
+            terrain.WaterReflectance = 0; terrain.WaterTransparency = 0.8
         end
     end)
 
     local function isMyPlayerStuff(obj)
-        if player.Character and (obj == player.Character or obj:IsDescendantOf(player.Character)) then
-            return true
-        end
+        if player.Character and (obj == player.Character or obj:IsDescendantOf(player.Character)) then return true end
         local backpack = player:FindFirstChild("Backpack")
-        if backpack and (obj == backpack or obj:IsDescendantOf(backpack)) then
-            return true
-        end
+        if backpack and (obj == backpack or obj:IsDescendantOf(backpack)) then return true end
         return false
     end
 
@@ -444,15 +429,9 @@ local function EnableClayPotato()
         pcall(function()
             if obj:IsA("BasePart") then
                 obj.Material = Enum.Material.SmoothPlastic
-                obj.Reflectance = 0
-                obj.CastShadow = false
-                obj.Color = GRAY_COLOR
-                
-                if obj:IsA("MeshPart") then
-                    obj.TextureID = "" 
-                end
-            elseif obj:IsA("SpecialMesh") then
-                obj.TextureId = "" 
+                obj.Reflectance = 0; obj.CastShadow = false; obj.Color = GRAY_COLOR
+                if obj:IsA("MeshPart") then obj.TextureID = "" end
+            elseif obj:IsA("SpecialMesh") then obj.TextureId = "" 
             elseif obj:IsA("Texture") or obj:IsA("Decal") or obj:IsA("SurfaceAppearance") then
                 task.defer(function() pcall(function() obj:Destroy() end) end)
             elseif obj:IsA("Clothing") or obj:IsA("ShirtGraphic") then
@@ -461,9 +440,7 @@ local function EnableClayPotato()
                 or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Sparkles") or obj:IsA("Fire") 
                 or obj:IsA("Smoke") or obj:IsA("Highlight") then
                 obj.Enabled = false
-            elseif obj:IsA("Light") then 
-                obj.Enabled = false
-            end
+            elseif obj:IsA("Light") then obj.Enabled = false end
         end)
     end
 
@@ -478,9 +455,7 @@ local function EnableClayPotato()
 
     if not clayDescendantConn then
         clayDescendantConn = workspace.DescendantAdded:Connect(function(obj)
-            if ConfigData.ClayPotato then
-                task.defer(superNuke, obj)
-            end
+            if ConfigData.ClayPotato then task.defer(superNuke, obj) end
         end)
     end
 end
@@ -598,7 +573,21 @@ end
 local TabAutomation = CreateTab("⚡ Automation", true)
 local TabBooster    = CreateTab("🚀 Booster & RAM", false)
 local TabWebhooks   = CreateTab("📡 Discord Webhooks", false)
+local TabTeleport   = CreateTab("🌍 Teleport Island", false)
 local TabConfig     = CreateTab("⚙️ Config Manager", false)
+
+-- Anti-mentok List Scrolling Fix untuk Semua Tab
+TabTeleport.AutomaticCanvasSize = Enum.AutomaticSize.Y
+TabTeleport.CanvasSize = UDim2.new(0, 0, 0, 0)
+Instance.new("UIPadding", TabTeleport).PaddingBottom = UDim.new(0, 25)
+
+TabBooster.AutomaticCanvasSize = Enum.AutomaticSize.Y
+TabBooster.CanvasSize = UDim2.new(0, 0, 0, 0)
+Instance.new("UIPadding", TabBooster).PaddingBottom = UDim.new(0, 25)
+
+TabWebhooks.AutomaticCanvasSize = Enum.AutomaticSize.Y
+TabWebhooks.CanvasSize = UDim2.new(0, 0, 0, 0)
+Instance.new("UIPadding", TabWebhooks).PaddingBottom = UDim.new(0, 25)
 
 local function CreateDropdown(parent, titleText)
     local DropdownFrame = Instance.new("Frame", parent)
@@ -694,6 +683,90 @@ local function CreateStatusLabel(parent)
     return Label
 end
 
+-- ====== SELECTOR DROPDOWN HELPERS ======
+local function CreateSelector(parent, titleText, items, onSelect)
+    local Frame = Instance.new("Frame", parent)
+    Frame.Size = UDim2.new(0.95, 0, 0, 32)
+    Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 6)
+
+    local Label = Instance.new("TextLabel", Frame)
+    Label.Size = UDim2.new(0.4, 0, 1, 0)
+    Label.Position = UDim2.new(0, 10, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = titleText
+    Label.TextColor3 = c_text
+    Label.Font = Enum.Font.GothamSemibold
+    Label.TextSize = 10
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+
+    local SelectBtn = Instance.new("TextButton", Frame)
+    SelectBtn.Size = UDim2.new(0.55, -10, 0, 24)
+    SelectBtn.Position = UDim2.new(0.45, 0, 0.5, -12)
+    SelectBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    SelectBtn.Text = "Select Option"
+    SelectBtn.TextColor3 = c_subtext
+    SelectBtn.Font = Enum.Font.GothamSemibold
+    SelectBtn.TextSize = 10
+    Instance.new("UICorner", SelectBtn).CornerRadius = UDim.new(0, 4)
+    Instance.new("UIStroke", SelectBtn).Color = Color3.fromRGB(50, 50, 60)
+
+    local ListContainer = Instance.new("Frame", parent)
+    ListContainer.Size = UDim2.new(0.95, 0, 0, 100)
+    ListContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    ListContainer.Visible = false
+    Instance.new("UICorner", ListContainer).CornerRadius = UDim.new(0, 6)
+    Instance.new("UIStroke", ListContainer).Color = Color3.fromRGB(50, 50, 60)
+
+    local Scroll = Instance.new("ScrollingFrame", ListContainer)
+    Scroll.Size = UDim2.new(1, -4, 1, -4)
+    Scroll.Position = UDim2.new(0, 2, 0, 2)
+    Scroll.BackgroundTransparency = 1
+    Scroll.BorderSizePixel = 0
+    Scroll.ScrollBarThickness = 2
+    Scroll.ScrollBarImageColor3 = c_accent
+
+    local ScrollLayout = Instance.new("UIListLayout", Scroll)
+    ScrollLayout.Padding = UDim.new(0, 2)
+    ScrollLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    SelectBtn.MouseButton1Click:Connect(function()
+        ListContainer.Visible = not ListContainer.Visible
+    end)
+
+    local function populate(newItems)
+        for _, child in ipairs(Scroll:GetChildren()) do
+            if child:IsA("TextButton") then child:Destroy() end
+        end
+        local ySize = 0
+        for _, item in ipairs(newItems) do
+            local btn = Instance.new("TextButton", Scroll)
+            btn.Size = UDim2.new(1, -4, 0, 24)
+            btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+            btn.Text = " " .. item
+            btn.TextColor3 = c_text
+            btn.Font = Enum.Font.Gotham
+            btn.TextSize = 10
+            btn.TextXAlignment = Enum.TextXAlignment.Left
+            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+
+            btn.MouseButton1Click:Connect(function()
+                SelectBtn.Text = item
+                SelectBtn.TextColor3 = c_text
+                ListContainer.Visible = false
+                if onSelect then onSelect(item) end
+            end)
+            ySize = ySize + 26
+        end
+        Scroll.CanvasSize = UDim2.new(0, 0, 0, ySize)
+        local targetHeight = math.clamp(ySize + 4, 30, 120)
+        ListContainer.Size = UDim2.new(0.95, 0, 0, targetHeight)
+    end
+
+    populate(items)
+    return Frame, populate, SelectBtn
+end
+
 -- ========================================================
 -- 6. MENU SETUP
 -- ========================================================
@@ -709,39 +782,99 @@ CreateToggle(DropElemental, "Enable Auto TP Cuaca", "AutoTP", function(state)
     end
 end)
 
--- 1. FEATURE AUTO ROTATE MAP 1 (ONLY MAP 1)
-local DropRotate = CreateDropdown(TabAutomation, "1. Auto Rotate Fishing (Map 1 Only)")
-local UIStatus_Rotate = CreateStatusLabel(DropRotate)
-CreateToggle(DropRotate, "Enable Auto Rotate Map 1", "AutoRotate", function(state)
-    if not state then UIStatus_Rotate.Text = "AUTO ROTATE MAP 1: OFF"; UIStatus_Rotate.TextColor3 = c_subtext end
-end)
+-- ====== AUTOMATION: AUTO FISHING MANAGER ======
+local DropFishing = CreateDropdown(TabAutomation, "🎣 Auto Fishing Manager")
 
--- 2. FEATURE AUTO FISHING MAP 2 (ONLY MAP 2 / TAMBANG CANYON)
-local DropMap2 = CreateDropdown(TabAutomation, "2. Auto Fishing (Map 2 Canyon Only)")
-local UIStatus_Map2 = CreateStatusLabel(DropMap2)
-CreateToggle(DropMap2, "Enable Mancing Map 2", "AutoMap2", function(state)
-    if not state then UIStatus_Map2.Text = "AUTO MAP 2: OFF"; UIStatus_Map2.TextColor3 = c_subtext end
-end)
-
--- 3. FEATURE AUTO DUAL MAP (SWITCH MAP 1 <-> MAP 2)
-local DropDualMap = CreateDropdown(TabAutomation, "3. Auto Switch Dual Map (Map 1 <-> Map 2)")
-local UIStatus_DualMap = CreateStatusLabel(DropDualMap)
-CreateToggle(DropDualMap, "Enable Auto Switch Map 1 & Map 2", "AutoDualMap", function(state)
-    if not state then UIStatus_DualMap.Text = "DUAL MAP SWITCH: OFF"; UIStatus_DualMap.TextColor3 = c_subtext end
-end)
-
-local DropBooster = CreateDropdown(TabBooster, "Graphic & Performance Booster")
-CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state) end)
-CreateToggle(DropBooster, "Clay Potato Mode (Anti-Lag & Daylight)", "ClayPotato", function(state)
-    if state then
-        EnableClayPotato()
+local fishingModes = {"Map 1 (Rotate)", "Map 2 (Canyon)", "Dual Map (Switch)"}
+local FishingSelectorFrame, FishingPopulate, FishingSelectBtn = CreateSelector(DropFishing, "Farming Mode", fishingModes, function(sel)
+    ConfigData.SelectedFarmingMode = sel
+    SaveConfig()
+    
+    if ConfigData.AutoFishingToggle then
+        ConfigData.AutoRotate = (sel == "Map 1 (Rotate)")
+        ConfigData.AutoMap2 = (sel == "Map 2 (Canyon)")
+        ConfigData.AutoDualMap = (sel == "Dual Map (Switch)")
     end
 end)
-CreateToggle(DropBooster, "Disable 3D Rendering", "Disable3D", function(state) RunService:Set3dRenderingEnabled(not state) end)
-CreateToggle(DropBooster, "Clear Water (Hilangkan Air)", "ClearWater", function(state) end)
-CreateToggle(DropBooster, "Limit 30 FPS", "Limit30FPS", function(state) if setfpscap then setfpscap(state and 30 or 60) end end)
-CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state) end)
 
+UI_Updaters["SelectedFarmingMode"] = function(newState)
+    FishingSelectBtn.Text = newState
+    FishingSelectBtn.TextColor3 = c_text
+end
+if not ConfigData.SelectedFarmingMode then ConfigData.SelectedFarmingMode = "Map 1 (Rotate)" end
+FishingSelectBtn.Text = ConfigData.SelectedFarmingMode
+FishingSelectBtn.TextColor3 = c_text
+
+CreateToggle(DropFishing, "Enable Auto Fishing", "AutoFishingToggle", function(state)
+    if state then
+        ConfigData.AutoRotate = (ConfigData.SelectedFarmingMode == "Map 1 (Rotate)")
+        ConfigData.AutoMap2 = (ConfigData.SelectedFarmingMode == "Map 2 (Canyon)")
+        ConfigData.AutoDualMap = (ConfigData.SelectedFarmingMode == "Dual Map (Switch)")
+    else
+        ConfigData.AutoRotate = false
+        ConfigData.AutoMap2 = false
+        ConfigData.AutoDualMap = false
+    end
+end)
+
+local UIStatus_Fishing = CreateStatusLabel(DropFishing)
+if not ConfigData.AutoFishingToggle then
+    UIStatus_Fishing.Text = "AUTO FISHING: OFF"
+    UIStatus_Fishing.TextColor3 = c_subtext
+end
+
+-- ====== BOOSTER & RAM (INDIVIDUAL TOGGLES IN LIST) ======
+local DropBooster = CreateDropdown(TabBooster, "🚀 Graphic & Performance Booster")
+local UIStatus_Booster = CreateStatusLabel(DropBooster)
+UIStatus_Booster.Text = "BOOSTER STATUS: ACTIVE"
+UIStatus_Booster.TextColor3 = Color3.fromRGB(50, 255, 100)
+
+CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state)
+    if UIStatus_Booster then
+        UIStatus_Booster.Text = "FPS BOOSTER: " .. (state and "ON" or "OFF")
+        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
+    end
+end)
+
+CreateToggle(DropBooster, "Clay Potato Mode", "ClayPotato", function(state)
+    if state then EnableClayPotato() end
+    if UIStatus_Booster then
+        UIStatus_Booster.Text = "CLAY POTATO: " .. (state and "ON" or "OFF")
+        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
+    end
+end)
+
+CreateToggle(DropBooster, "Disable 3D Rendering", "Disable3D", function(state)
+    RunService:Set3dRenderingEnabled(not state)
+    if UIStatus_Booster then
+        UIStatus_Booster.Text = "3D RENDERING: " .. (state and "DISABLED" or "ENABLED")
+        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
+    end
+end)
+
+CreateToggle(DropBooster, "Clear Water", "ClearWater", function(state)
+    if UIStatus_Booster then
+        UIStatus_Booster.Text = "CLEAR WATER: " .. (state and "ON" or "OFF")
+        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
+    end
+end)
+
+CreateToggle(DropBooster, "Limit 30 FPS", "Limit30FPS", function(state)
+    if setfpscap then setfpscap(state and 30 or 60) end
+    if UIStatus_Booster then
+        UIStatus_Booster.Text = "LIMIT 30 FPS: " .. (state and "ON" or "OFF")
+        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
+    end
+end)
+
+CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state)
+    if UIStatus_Booster then
+        UIStatus_Booster.Text = "AUTO RAM: " .. (state and "ON" or "OFF")
+        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
+    end
+end)
+
+-- ====== DISCORD WEBHOOKS (INDIVIDUAL TOGGLES IN LIST) ======
 local DropGlobalWeb = CreateDropdown(TabWebhooks, "🔗 Global Webhook Configuration")
 CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL", function(txt) end)
 
@@ -751,28 +884,121 @@ UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles)
 local trackerInterval = 3600
 local trackerRemaining = 0
 
-CreateToggle(DropWebToggles, "Enable Player Tracker", "WebhookPlayer", function(state)
+CreateToggle(DropWebToggles, "Player Tracker Webhook", "WebhookPlayer", function(state)
     isTrackerActive = state
-    if not state then
-        trackerRemaining = 0
-        task.spawn(function()
-            trackerUIPaused = true
-            UIStatus_PlayerMon.Text = "TRACKER : DISABLED"
-            UIStatus_PlayerMon.TextColor3 = c_subtext
-            task.wait(1)
-            trackerUIPaused = false
-        end)
-    else
+    if state then
         trackerRemaining = trackerInterval
+    else
+        trackerRemaining = 0
+        trackerUIPaused = false
+    end
+    if UIStatus_PlayerMon then
+        UIStatus_PlayerMon.Text = state and "TRACKER: ON" or "TRACKER: OFF"
+        UIStatus_PlayerMon.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
     end
 end)
 
--- TOGGLE BARU UNTUK PLAYER JOIN/LEAVE ALERT WITH SAVE TOGGLE
-CreateToggle(DropWebToggles, "Enable Player Join/Leave Alert", "WebhookJoinLeave", function(state) end)
+CreateToggle(DropWebToggles, "Join / Leave Alert Webhook", "WebhookJoinLeave", function(state)
+    if UIStatus_PlayerMon then
+        UIStatus_PlayerMon.Text = state and "JOIN/LEAVE ALERT: ON" or "JOIN/LEAVE ALERT: OFF"
+        UIStatus_PlayerMon.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
+    end
+end)
 
 local DropWebTest = CreateDropdown(TabWebhooks, "🧪 Test Webhook Triggers")
 CreateButton(DropWebTest, "🚀 Kirim Test Player Tracker Manual", function() SendPlayerList(true) end)
 
+-- ========================================================
+-- 6.5. MENU TELEPORT MAP & PLAYER
+-- ========================================================
+local DropMapTP = CreateDropdown(TabTeleport, "Teleport to Island")
+
+local MapLocations = {
+    {Name = "Hutan Kuno", Pos = Vector3.new(1482.70, 11.14, -300.65), Rot = -30.84},
+    {Name = "Kedalaman Esoterik", Pos = Vector3.new(3210.66, -1302.86, 1407.32), Rot = 18.56},
+    {Name = "Kedalaman Kristal", Pos = Vector3.new(5703.96, -905.21, 15328.31), Rot = -161.77},
+    {Name = "Ngarai Tembaga (Spot 1)", Pos = Vector3.new(-4171.59, 3.23, 566.77), Rot = 148.32},
+    {Name = "Ngarai Tembaga (Spot 2)", Pos = Vector3.new(-4164.58, 59.63, 409.79), Rot = 104.76},
+    {Name = "Pulau Kawah", Pos = Vector3.new(978.88, 47.48, 5086.54), Rot = 127.91},
+    {Name = "Runtuhan Kuno", Pos = Vector3.new(6089.14, -585.92, 4639.69), Rot = 142.21},
+    {Name = "Tambang Canyon Tembaga", Pos = Vector3.new(-4031.78, -544.08, 577.91), Rot = 25.84},
+    {Name = "Terumbu Karang", Pos = Vector3.new(-3028.41, 2.51, 2269.79), Rot = 84.12}
+}
+
+local selectedMap = nil
+local mapNames = {}
+for _, map in ipairs(MapLocations) do table.insert(mapNames, map.Name) end
+
+local MapFrame, MapPopulate, MapSelectBtn = CreateSelector(DropMapTP, "Select Island", mapNames, function(sel)
+    selectedMap = sel
+end)
+
+local BtnTeleportMap = CreateButton(DropMapTP, "Teleport", function()
+    if not selectedMap then return end
+    for _, map in ipairs(MapLocations) do
+        if map.Name == selectedMap then
+            local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.CFrame = CFrame.new(map.Pos) * CFrame.Angles(0, math.rad(map.Rot), 0)
+                hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+            end
+            break
+        end
+    end
+end)
+BtnTeleportMap.BackgroundColor3 = c_sidebar
+BtnTeleportMap.TextColor3 = c_accent
+BtnTeleportMap.Font = Enum.Font.GothamBold
+local UIStrokeMap = Instance.new("UIStroke", BtnTeleportMap)
+UIStrokeMap.Color = c_accent
+UIStrokeMap.Thickness = 1
+
+local DropPlayerTP = CreateDropdown(TabTeleport, "Teleport to Player")
+
+local playerMap = {}
+local selectedPlayerObj = nil
+local PlayerFrame, PlayerPopulate, PlayerSelectBtn = CreateSelector(DropPlayerTP, "Select Player", {}, function(selText)
+    selectedPlayerObj = playerMap[selText]
+end)
+
+local BtnTeleportPlayer = CreateButton(DropPlayerTP, "Teleport to selected Player", function()
+    if not selectedPlayerObj then return end
+    local myHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    local targetHrp = selectedPlayerObj.Character and selectedPlayerObj.Character:FindFirstChild("HumanoidRootPart")
+    if myHrp and targetHrp then
+        myHrp.CFrame = targetHrp.CFrame
+        myHrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end
+end)
+BtnTeleportPlayer.BackgroundColor3 = c_sidebar
+BtnTeleportPlayer.TextColor3 = c_accent
+BtnTeleportPlayer.Font = Enum.Font.GothamBold
+local UIStrokePlayer = Instance.new("UIStroke", BtnTeleportPlayer)
+UIStrokePlayer.Color = c_accent
+UIStrokePlayer.Thickness = 1
+
+local function LoadPlayers()
+    playerMap = {}
+    local pDisplayNames = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player then
+            local pText = p.DisplayName .. " (@" .. p.Name .. ")"
+            table.insert(pDisplayNames, pText)
+            playerMap[pText] = p
+        end
+    end
+    PlayerPopulate(pDisplayNames)
+    selectedPlayerObj = nil
+    PlayerSelectBtn.Text = "Select Option"
+    PlayerSelectBtn.TextColor3 = c_subtext
+end
+
+local BtnRefreshPlayer = CreateButton(DropPlayerTP, "Refresh Player List", LoadPlayers)
+LoadPlayers() 
+
+-- ========================================================
+-- CONFIG MANAGER
+-- ========================================================
 local DropConfigSystem = CreateDropdown(TabConfig, "Configuration Manager")
 CreateButton(DropConfigSystem, "💾 Save UI Settings Manual", function() SaveConfig() end)
 local BtnReset = CreateButton(DropConfigSystem, "⚠️ Reset Settingan (Tanpa DC)", function() end)
@@ -808,7 +1034,6 @@ player.Idled:Connect(function() if ConfigData.AntiAFK then VirtualUser:CaptureCo
 
 task.spawn(function() while true do task.wait(60); if ConfigData.AutoRAM then collectgarbage("collect") end end end)
 
--- THREAD 1: EVENT ELEMENTAL TP
 task.spawn(function()
     while true do
         task.wait(1)
@@ -854,7 +1079,6 @@ task.spawn(function()
     end
 end)
 
--- THREAD 2: FITUR 1 (AUTO ROTATE MAP 1 - STANDALONE)
 task.spawn(function()
     while true do
         if ConfigData.AutoRotate and not ConfigData.AutoDualMap then
@@ -873,8 +1097,10 @@ task.spawn(function()
                 local elapsed = 0
                 while elapsed < rotateInterval and ConfigData.AutoRotate and not ConfigData.AutoDualMap do
                     local sisaDetik = rotateInterval - elapsed
-                    UIStatus_Rotate.Text = "MAP 1 ROTATE: " .. formatSecondsToText(sisaDetik)
-                    UIStatus_Rotate.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    if UIStatus_Fishing then
+                        UIStatus_Fishing.Text = "MAP 1 ROTATE: " .. formatSecondsToText(sisaDetik)
+                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    end
                     task.wait(1); elapsed = elapsed + 1
                 end
             else
@@ -886,7 +1112,6 @@ task.spawn(function()
     end
 end)
 
--- THREAD 3: FITUR 2 (MANCING MAP 2 CANYON - STANDALONE NO ROTATE)
 task.spawn(function()
     while true do
         if ConfigData.AutoMap2 and not ConfigData.AutoDualMap then
@@ -897,8 +1122,10 @@ task.spawn(function()
                     hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
                     hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
                 end
-                UIStatus_Map2.Text = "MAP 2 ACTIVE (STAY STAYING)"
-                UIStatus_Map2.TextColor3 = Color3.fromRGB(50, 255, 100)
+                if UIStatus_Fishing then
+                    UIStatus_Fishing.Text = "MAP 2 ACTIVE (STAY STAYING)"
+                    UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
+                end
             end
             task.wait(1)
         else
@@ -907,13 +1134,11 @@ task.spawn(function()
     end
 end)
 
--- THREAD 4: FITUR 3 (AUTO SWITCH DUAL MAP 1 <-> MAP 2)
 task.spawn(function()
     while true do
         if ConfigData.AutoDualMap then
             local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
             
-            -- PHASE 1: MANCING DI MAP 1 (DENGAN AUTO ROTATE)
             if ConfigData.AutoDualMap then
                 local map1Timer = 0
                 while map1Timer < dualMapInterval and ConfigData.AutoDualMap do
@@ -934,8 +1159,10 @@ task.spawn(function()
                     local subTimer = 0
                     while subTimer < rotateInterval and map1Timer < dualMapInterval and ConfigData.AutoDualMap do
                         local sisaPindah = dualMapInterval - map1Timer
-                        UIStatus_DualMap.Text = "MAP 1 (ROTATING) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
-                        UIStatus_DualMap.TextColor3 = Color3.fromRGB(100, 200, 255)
+                        if UIStatus_Fishing then
+                            UIStatus_Fishing.Text = "MAP 1 (ROTATING) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(100, 200, 255)
+                        end
                         task.wait(1)
                         subTimer = subTimer + 1
                         map1Timer = map1Timer + 1
@@ -943,7 +1170,6 @@ task.spawn(function()
                 end
             end
 
-            -- PHASE 2: MANCING DI MAP 2 (NO ROTATE / ROTATE OFF / STAY FIT)
             if ConfigData.AutoDualMap then
                 local map2Timer = 0
                 hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -964,8 +1190,10 @@ task.spawn(function()
                     end
 
                     local sisaPindah = dualMapInterval - map2Timer
-                    UIStatus_DualMap.Text = "MAP 2 (ROTATE OFF) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
-                    UIStatus_DualMap.TextColor3 = Color3.fromRGB(255, 200, 50)
+                    if UIStatus_Fishing then
+                        UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
+                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                    end
                     task.wait(1)
                     map2Timer = map2Timer + 1
                 end
