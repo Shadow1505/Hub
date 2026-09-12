@@ -86,8 +86,9 @@ local map2Pos = Vector3.new(-4014.58, -543.00, 564.95)
 local map2Degree = 46.85
 local map2CFrame = CFrame.new(map2Pos) * CFrame.Angles(0, math.rad(map2Degree), 0)
 
-local rotateInterval = 1200
-local dualMapInterval = 3600
+-- Timer Updated: 58 Menit Total & 3x Rotate
+local rotateInterval = 1160
+local dualMapInterval = 3480
 
 local function GetEventScheduleWIB()
     local utc_time = os.time()
@@ -995,6 +996,48 @@ end
 
 local BtnRefreshPlayer = CreateButton(DropPlayerTP, "Refresh Player List", LoadPlayers)
 LoadPlayers() 
+
+-- ========================================================
+-- FEATURE BARU: SAVED LOCATION TELEPORT
+-- ========================================================
+local DropSavedTP = CreateDropdown(TabTeleport, "📌 Custom Saved Location")
+local savedCustomLocation = nil
+
+local SavedLocOptions = {
+    "Save Current Location",
+    "Teleport to Saved",
+    "Reset Saved Location"
+}
+
+local SavedLocFrame, SavedLocPopulate, SavedLocSelectBtn = CreateSelector(DropSavedTP, "Select Action", SavedLocOptions, function(sel)
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if sel == "Save Current Location" then
+        if hrp then
+            savedCustomLocation = hrp.CFrame
+            SavedLocSelectBtn.Text = "Location Saved!"
+            SavedLocSelectBtn.TextColor3 = Color3.fromRGB(50, 255, 100)
+        end
+    elseif sel == "Teleport to Saved" then
+        if savedCustomLocation and hrp then
+            hrp.CFrame = savedCustomLocation
+            hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+            SavedLocSelectBtn.Text = "Teleported!"
+            SavedLocSelectBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
+        else
+            SavedLocSelectBtn.Text = "No Save Found!"
+            SavedLocSelectBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+    elseif sel == "Reset Saved Location" then
+        savedCustomLocation = nil
+        SavedLocSelectBtn.Text = "Location Reset!"
+        SavedLocSelectBtn.TextColor3 = Color3.fromRGB(255, 200, 50)
+    end
+    
+    task.delay(2, function()
+        SavedLocSelectBtn.Text = "Select Action"
+        SavedLocSelectBtn.TextColor3 = c_subtext
+    end)
+end)
 
 -- ========================================================
 -- CONFIG MANAGER
