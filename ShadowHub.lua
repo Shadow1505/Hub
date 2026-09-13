@@ -7,6 +7,8 @@ local VirtualUser = game:GetService("VirtualUser")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
+local CoreGui = game:GetService("CoreGui")
 local workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
@@ -36,7 +38,22 @@ local DefaultConfig = {
     WebhookJoinLeave = false,
     UISizeX = 520,
     UISizeY = 320,
-    AutoTeleportSpawn = false
+    AutoTeleportSpawn = false,
+    
+    -- NEW CONFIGS
+    StaffDetector = false,
+    AutoReconnect = false,
+    Freecam = false,
+    UnlimitedZoom = true,
+    SprintSpeed = 16,
+    FlySpeed = 50,
+    InfiniteJump = false,
+    FlyMode = false,
+    NoClip = false,
+    Invisible = false,
+    LavaImmunity = false,
+    HideStats = false,
+    SelectedTheme = "Default"
 }
 
 local ConfigData = {}
@@ -68,6 +85,45 @@ end
 LoadConfig()
 
 -- ========================================================
+-- THEME MANAGER SYSTEM
+-- ========================================================
+local Themes = {
+    ["Default"] = {
+        bg = Color3.fromRGB(15, 15, 18), sidebar = Color3.fromRGB(20, 20, 24), content = Color3.fromRGB(25, 25, 30),
+        accent = Color3.fromRGB(140, 60, 255), text = Color3.fromRGB(240, 240, 240), subtext = Color3.fromRGB(170, 170, 170)
+    },
+    ["Elegant Gold"] = {
+        bg = Color3.fromRGB(20, 18, 15), sidebar = Color3.fromRGB(26, 23, 20), content = Color3.fromRGB(36, 30, 25),
+        accent = Color3.fromRGB(212, 175, 55), text = Color3.fromRGB(250, 245, 235), subtext = Color3.fromRGB(180, 170, 150)
+    }
+}
+
+local currentTheme = Themes[ConfigData.SelectedTheme] or Themes["Default"]
+local c_bg, c_sidebar, c_content, c_accent, c_text, c_subtext = currentTheme.bg, currentTheme.sidebar, currentTheme.content, currentTheme.accent, currentTheme.text, currentTheme.subtext
+
+local function ApplyTheme()
+    local t = Themes[ConfigData.SelectedTheme] or Themes["Default"]
+    c_bg, c_sidebar, c_content, c_accent, c_text, c_subtext = t.bg, t.sidebar, t.content, t.accent, t.text, t.subtext
+    
+    local gui = CoreGui:FindFirstChild("Shadow_Panel_V8")
+    if not gui then return end
+    
+    for _, obj in ipairs(gui:GetDescendants()) do
+        local role = obj:GetAttribute("ThemeRole")
+        if role == "bg" then obj.BackgroundColor3 = c_bg
+        elseif role == "sidebar" then obj.BackgroundColor3 = c_sidebar
+        elseif role == "content" then obj.BackgroundColor3 = c_content
+        elseif role == "accent_bg" then obj.BackgroundColor3 = c_accent
+        elseif role == "text" then obj.TextColor3 = c_text
+        elseif role == "subtext" then obj.TextColor3 = c_subtext
+        elseif role == "accent_text" then obj.TextColor3 = c_accent
+        elseif role == "stroke" then pcall(function() obj.Color = Color3.fromRGB(40, 40, 50) end)
+        elseif role == "scroll" then pcall(function() obj.ScrollBarImageColor3 = c_accent end)
+        end
+    end
+end
+
+-- ========================================================
 -- 2. DATA KOORDINAT, DETEKSI MAP & HELPERS
 -- ========================================================
 local spotKordinat = {
@@ -79,9 +135,7 @@ local spotKordinat = {
 local DatabaseIconCuaca = {["118379404229807"] = "Blizzard", ["105076841543450"] = "Storm", ["76632496002371"] = "Volcano"}
 local posisiSimpanan = nil
 
--- State Priority Lock
 local isWeatherTPBusy = false
-
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
 local currentPoolIndex = 1
@@ -90,7 +144,6 @@ local map2Pos = Vector3.new(-4014.58, -543.00, 564.95)
 local map2Degree = 46.85
 local map2CFrame = CFrame.new(map2Pos) * CFrame.Angles(0, math.rad(map2Degree), 0)
 
--- Timer Updated: 58 Menit Total & 3x Rotate
 local rotateInterval = 1160
 local dualMapInterval = 3480
 
@@ -320,16 +373,12 @@ local function SendPlayerList(isManual)
     end
 end
 
--- ========================================================
--- 3.5. PLAYER JOIN / LEAVE ALERT 
--- ========================================================
 local function SendJoinLeaveNotification(targetPlayer, isJoin)
     local url = ConfigData.WebhookURL
     if not url or url == "" or not string.find(url, "discord") then return end
     if not ConfigData.WebhookJoinLeave then return end
 
     url = url:match("^%s*(.-)%s*$")
-    
     local statusText = isJoin and "🟢 JOINED THE SERVER" or "🔴 LEFT THE SERVER"
     local colorCode = isJoin and 3066993 or 15158332
     
@@ -347,14 +396,9 @@ local function SendJoinLeaveNotification(targetPlayer, isJoin)
                 ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
             }}
         }
-        
         local requestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
         if requestFunc then
-            task.spawn(function()
-                pcall(function()
-                    requestFunc({Url = url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(payload)})
-                end)
-            end)
+            task.spawn(function() pcall(function() requestFunc({Url = url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(payload)}) end) end)
         end
     end
 
@@ -365,9 +409,7 @@ local function SendJoinLeaveNotification(targetPlayer, isJoin)
         end)
     else
         local loc = "Lautan Luas (Ocean)"
-        if trackedPlayers[targetPlayer.UserId] then
-            loc = "Last Loc: " .. trackedPlayers[targetPlayer.UserId].Location
-        end
+        if trackedPlayers[targetPlayer.UserId] then loc = "Last Loc: " .. trackedPlayers[targetPlayer.UserId].Location end
         FireWebhook(loc)
     end
 end
@@ -470,25 +512,22 @@ end
 -- ========================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Shadow_Panel_V8"
-ScreenGui.Parent = (gethui and gethui()) or game:GetService("CoreGui") or player.PlayerGui
-
-local c_bg = Color3.fromRGB(15, 15, 18); local c_sidebar = Color3.fromRGB(20, 20, 24)
-local c_content = Color3.fromRGB(25, 25, 30); local c_accent = Color3.fromRGB(140, 60, 255)
-local c_text = Color3.fromRGB(240, 240, 240); local c_subtext = Color3.fromRGB(170, 170, 170)
+ScreenGui.Parent = CoreGui:FindFirstChild("RobloxGui") or CoreGui
 
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, ConfigData.UISizeX or 520, 0, ConfigData.UISizeY or 320)
 MainFrame.Position = UDim2.new(0.5, -(ConfigData.UISizeX or 520)/2, 0.5, -(ConfigData.UISizeY or 320)/2)
 MainFrame.BackgroundColor3 = c_bg; MainFrame.Active = true; MainFrame.Draggable = true
+MainFrame:SetAttribute("ThemeRole", "bg")
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
-Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(40, 40, 50); MainFrame.UIStroke.Thickness = 1
+local MS = Instance.new("UIStroke", MainFrame); MS.Color = Color3.fromRGB(40, 40, 50); MS.Thickness = 1
+MS:SetAttribute("ThemeRole", "stroke")
 
 local LogoBtn = Instance.new("TextButton", ScreenGui)
-LogoBtn.Size = UDim2.new(0, 45, 0, 45) 
-LogoBtn.Position = UDim2.new(0, 15, 0.45, 0)
+LogoBtn.Size = UDim2.new(0, 45, 0, 45); LogoBtn.Position = UDim2.new(0, 15, 0.45, 0)
 LogoBtn.BackgroundColor3 = c_sidebar; LogoBtn.Text = "SHDW\n🚀"; LogoBtn.TextColor3 = c_accent
-LogoBtn.Font = Enum.Font.GothamBlack; LogoBtn.TextSize = 11; LogoBtn.Active = true; LogoBtn.Draggable = true
-LogoBtn.Visible = false
+LogoBtn:SetAttribute("ThemeRole", "sidebar")
+LogoBtn.Font = Enum.Font.GothamBlack; LogoBtn.TextSize = 11; LogoBtn.Active = true; LogoBtn.Draggable = true; LogoBtn.Visible = false
 Instance.new("UICorner", LogoBtn).CornerRadius = UDim.new(0, 10)
 
 local Header = Instance.new("Frame", MainFrame)
@@ -497,11 +536,13 @@ Header.Size = UDim2.new(1, 0, 0, 40); Header.BackgroundTransparency = 1
 local TitleLabel = Instance.new("TextLabel", Header)
 TitleLabel.Size = UDim2.new(0.6, 0, 1, 0); TitleLabel.Position = UDim2.new(0, 15, 0, 0)
 TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "⚜️ SHADOW HUB 🚀"; TitleLabel.TextColor3 = c_accent
+TitleLabel:SetAttribute("ThemeRole", "accent_text")
 TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.TextSize = 13; TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local CloseBtn = Instance.new("TextButton", Header)
 CloseBtn.Size = UDim2.new(0, 40, 0, 40); CloseBtn.Position = UDim2.new(1, -40, 0, 0)
 CloseBtn.BackgroundTransparency = 1; CloseBtn.Text = "—"; CloseBtn.TextColor3 = c_accent
+CloseBtn:SetAttribute("ThemeRole", "accent_text")
 CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.TextSize = 16
 
 LogoBtn.MouseButton1Click:Connect(function() MainFrame.Visible = true; LogoBtn.Visible = false end)
@@ -510,35 +551,31 @@ CloseBtn.MouseButton1Click:Connect(function() MainFrame.Visible = false; LogoBtn
 local ResizeHandle = Instance.new("TextButton", MainFrame)
 ResizeHandle.Size = UDim2.new(0, 20, 0, 20); ResizeHandle.Position = UDim2.new(1, -20, 1, -20)
 ResizeHandle.BackgroundTransparency = 1; ResizeHandle.Text = "◢"; ResizeHandle.TextColor3 = c_subtext
+ResizeHandle:SetAttribute("ThemeRole", "subtext")
 ResizeHandle.TextSize = 14; ResizeHandle.Font = Enum.Font.GothamBold
 
 local isDraggingResize = false; local dragStartPos, startSize
-
 ResizeHandle.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         isDraggingResize = true; dragStartPos = input.Position; startSize = MainFrame.Size
     end
 end)
-
 UserInputService.InputChanged:Connect(function(input)
     if isDraggingResize and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         local delta = input.Position - dragStartPos
         MainFrame.Size = UDim2.new(0, math.clamp(startSize.X.Offset + delta.X, 400, 900), 0, math.clamp(startSize.Y.Offset + delta.Y, 250, 600))
     end
 end)
-
 UserInputService.InputEnded:Connect(function(input)
     if isDraggingResize and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-        isDraggingResize = false
-        ConfigData.UISizeX = MainFrame.Size.X.Offset
-        ConfigData.UISizeY = MainFrame.Size.Y.Offset
-        SaveConfig()
+        isDraggingResize = false; ConfigData.UISizeX = MainFrame.Size.X.Offset; ConfigData.UISizeY = MainFrame.Size.Y.Offset; SaveConfig()
     end
 end)
 
 local Sidebar = Instance.new("Frame", MainFrame)
 Sidebar.Size = UDim2.new(0, 160, 1, -40); Sidebar.Position = UDim2.new(0, 0, 0, 40)
 Sidebar.BackgroundColor3 = c_sidebar; Sidebar.BorderSizePixel = 0
+Sidebar:SetAttribute("ThemeRole", "sidebar")
 Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 10)
 local SidebarList = Instance.new("UIListLayout", Sidebar)
 SidebarList.Padding = UDim.new(0, 4); SidebarList.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -548,20 +585,26 @@ local function CreateTab(name, active)
     local btn = Instance.new("TextButton", Sidebar)
     btn.Size = UDim2.new(0.92, 0, 0, 34); btn.BackgroundColor3 = active and Color3.fromRGB(35, 35, 45) or c_sidebar
     btn.Text = "  " .. name; btn.TextColor3 = active and c_text or c_subtext
+    btn:SetAttribute("ThemeRole", active and "content" or "sidebar")
     btn.Font = Enum.Font.GothamSemibold; btn.TextSize = 10; btn.TextXAlignment = Enum.TextXAlignment.Left; btn.AutoButtonColor = false
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
     
     local indicator = Instance.new("Frame", btn)
     indicator.Size = UDim2.new(0, 3, 0.6, 0); indicator.Position = UDim2.new(0, 2, 0.2, 0)
     indicator.BackgroundColor3 = c_accent; indicator.BorderSizePixel = 0; indicator.Visible = active
+    indicator:SetAttribute("ThemeRole", "accent_bg")
     Instance.new("UICorner", indicator).CornerRadius = UDim.new(1, 0)
 
     local PageScroll = Instance.new("ScrollingFrame", MainFrame)
     PageScroll.Size = UDim2.new(1, -170, 1, -50); PageScroll.Position = UDim2.new(0, 170, 0, 40)
     PageScroll.BackgroundTransparency = 1; PageScroll.BorderSizePixel = 0
     PageScroll.ScrollBarThickness = 3; PageScroll.ScrollBarImageColor3 = c_accent; PageScroll.Visible = active
+    PageScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    PageScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    PageScroll:SetAttribute("ThemeRole", "scroll")
     local Layout = Instance.new("UIListLayout", PageScroll)
     Layout.Padding = UDim.new(0, 8); Layout.SortOrder = Enum.SortOrder.LayoutOrder
+    Instance.new("UIPadding", PageScroll).PaddingBottom = UDim.new(0, 25)
 
     Pages[name] = {Button = btn, Indicator = indicator, Frame = PageScroll}
     btn.MouseButton1Click:Connect(function()
@@ -569,7 +612,9 @@ local function CreateTab(name, active)
             local isTarget = (pName == name)
             pData.Frame.Visible = isTarget; pData.Indicator.Visible = isTarget
             pData.Button.BackgroundColor3 = isTarget and Color3.fromRGB(35, 35, 45) or c_sidebar
+            pData.Button:SetAttribute("ThemeRole", isTarget and "content" or "sidebar")
             pData.Button.TextColor3 = isTarget and c_text or c_subtext
+            ApplyTheme() -- Segarkan warna btn jika sedang aktif
         end
     end)
     return PageScroll
@@ -579,30 +624,20 @@ local TabAutomation = CreateTab("⚡ Automation", true)
 local TabBooster    = CreateTab("🚀 Booster & RAM", false)
 local TabWebhooks   = CreateTab("📡 Discord Webhooks", false)
 local TabTeleport   = CreateTab("🌍 Teleport Island", false)
+local TabPlayerMods = CreateTab("🛠️ Player & Server", false)
 local TabConfig     = CreateTab("⚙️ Config Manager", false)
-
--- Anti-mentok List Scrolling Fix untuk Semua Tab
-TabTeleport.AutomaticCanvasSize = Enum.AutomaticSize.Y
-TabTeleport.CanvasSize = UDim2.new(0, 0, 0, 0)
-Instance.new("UIPadding", TabTeleport).PaddingBottom = UDim.new(0, 25)
-
-TabBooster.AutomaticCanvasSize = Enum.AutomaticSize.Y
-TabBooster.CanvasSize = UDim2.new(0, 0, 0, 0)
-Instance.new("UIPadding", TabBooster).PaddingBottom = UDim.new(0, 25)
-
-TabWebhooks.AutomaticCanvasSize = Enum.AutomaticSize.Y
-TabWebhooks.CanvasSize = UDim2.new(0, 0, 0, 0)
-Instance.new("UIPadding", TabWebhooks).PaddingBottom = UDim.new(0, 25)
 
 local function CreateDropdown(parent, titleText)
     local DropdownFrame = Instance.new("Frame", parent)
     DropdownFrame.Size = UDim2.new(1, -10, 0, 38); DropdownFrame.BackgroundColor3 = c_content
+    DropdownFrame:SetAttribute("ThemeRole", "content")
     DropdownFrame.ClipsDescendants = true; DropdownFrame.AutomaticSize = Enum.AutomaticSize.Y
     Instance.new("UICorner", DropdownFrame).CornerRadius = UDim.new(0, 8)
     
     local TopBtn = Instance.new("TextButton", DropdownFrame)
     TopBtn.Size = UDim2.new(1, 0, 0, 38); TopBtn.BackgroundTransparency = 1
-    TopBtn.Text = "   " .. titleText; TopBtn.TextColor3 = c_text; TopBtn.Font = Enum.Font.GothamBold; TopBtn.TextSize = 11; TopBtn.TextXAlignment = Enum.TextXAlignment.Left
+    TopBtn.Text = "   " .. titleText; TopBtn.TextColor3 = c_text; TopBtn:SetAttribute("ThemeRole", "text")
+    TopBtn.Font = Enum.Font.GothamBold; TopBtn.TextSize = 11; TopBtn.TextXAlignment = Enum.TextXAlignment.Left
     
     local ItemsContainer = Instance.new("Frame", DropdownFrame)
     ItemsContainer.Size = UDim2.new(1, 0, 0, 0); ItemsContainer.Position = UDim2.new(0, 0, 0, 38)
@@ -623,12 +658,13 @@ local function CreateToggle(parent, text, configKey, callback)
     
     local Label = Instance.new("TextLabel", Frame)
     Label.Size = UDim2.new(0.65, 0, 1, 0); Label.Position = UDim2.new(0, 10, 0, 0)
-    Label.BackgroundTransparency = 1; Label.Text = text; Label.TextColor3 = c_text
+    Label.BackgroundTransparency = 1; Label.Text = text; Label.TextColor3 = c_text; Label:SetAttribute("ThemeRole", "text")
     Label.Font = Enum.Font.GothamSemibold; Label.TextSize = 10; Label.TextXAlignment = Enum.TextXAlignment.Left
     
     local ToggleBtn = Instance.new("TextButton", Frame)
     ToggleBtn.Size = UDim2.new(0, 36, 0, 18); ToggleBtn.Position = UDim2.new(1, -45, 0.5, -9)
     ToggleBtn.BackgroundColor3 = ConfigData[configKey] and c_accent or Color3.fromRGB(60, 60, 70); ToggleBtn.Text = ""
+    ToggleBtn:SetAttribute("ThemeRole", ConfigData[configKey] and "accent_bg" or "none")
     Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(1, 0)
     
     local Circle = Instance.new("Frame", ToggleBtn)
@@ -642,6 +678,7 @@ local function CreateToggle(parent, text, configKey, callback)
         state = newState
         local targetColor = state and c_accent or Color3.fromRGB(60, 60, 70)
         local targetPos = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+        ToggleBtn:SetAttribute("ThemeRole", state and "accent_bg" or "none")
         TweenService:Create(ToggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play()
         TweenService:Create(Circle, TweenInfo.new(0.2), {Position = targetPos}):Play()
         if callback then callback(state) end
@@ -656,9 +693,9 @@ end
 local function CreateButton(parent, text, callback)
     local Btn = Instance.new("TextButton", parent)
     Btn.Size = UDim2.new(0.95, 0, 0, 32); Btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-    Btn.Text = text; Btn.TextColor3 = c_text; Btn.Font = Enum.Font.GothamSemibold; Btn.TextSize = 10
+    Btn.Text = text; Btn.TextColor3 = c_text; Btn:SetAttribute("ThemeRole", "text"); Btn.Font = Enum.Font.GothamSemibold; Btn.TextSize = 10
     Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 6)
-    Instance.new("UIStroke", Btn).Color = Color3.fromRGB(50, 50, 60); Btn.UIStroke.Thickness = 1
+    local s = Instance.new("UIStroke", Btn); s.Color = Color3.fromRGB(50, 50, 60); s.Thickness = 1
     Btn.MouseButton1Click:Connect(callback)
     return Btn
 end
@@ -671,7 +708,7 @@ local function CreateTextBox(parent, placeholder, configKey, callback)
     local Box = Instance.new("TextBox", BoxFrame)
     Box.Size = UDim2.new(1, -20, 1, 0); Box.Position = UDim2.new(0, 10, 0, 0)
     Box.BackgroundTransparency = 1; Box.PlaceholderText = placeholder
-    Box.Text = tostring(ConfigData[configKey] or ""); Box.TextColor3 = c_text
+    Box.Text = tostring(ConfigData[configKey] or ""); Box.TextColor3 = c_text; Box:SetAttribute("ThemeRole", "text")
     Box.PlaceholderColor3 = c_subtext; Box.Font = Enum.Font.GothamSemibold; Box.TextSize = 10; Box.TextXAlignment = Enum.TextXAlignment.Left; Box.ClearTextOnFocus = false
     
     UI_Updaters[configKey] = function(newState) Box.Text = tostring(newState) end
@@ -681,426 +718,218 @@ end
 local function CreateStatusLabel(parent)
     local Label = Instance.new("TextLabel", parent)
     Label.Size = UDim2.new(0.95, 0, 0, 28); Label.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    Label.Text = "Status: IDLE"; Label.TextColor3 = c_subtext
+    Label.Text = "Status: IDLE"; Label.TextColor3 = c_subtext; Label:SetAttribute("ThemeRole", "subtext")
     Label.Font = Enum.Font.GothamBold; Label.TextSize = 10
     Instance.new("UICorner", Label).CornerRadius = UDim.new(0, 6)
-    Instance.new("UIStroke", Label).Color = c_accent; Label.UIStroke.Thickness = 1
+    local s = Instance.new("UIStroke", Label); s.Color = c_accent; s.Thickness = 1; s:SetAttribute("ThemeRole", "stroke")
     return Label
 end
 
--- ====== SELECTOR DROPDOWN HELPERS ======
 local function CreateSelector(parent, titleText, items, onSelect)
     local Frame = Instance.new("Frame", parent)
-    Frame.Size = UDim2.new(0.95, 0, 0, 32)
-    Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+    Frame.Size = UDim2.new(0.95, 0, 0, 32); Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
     Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 6)
 
     local Label = Instance.new("TextLabel", Frame)
-    Label.Size = UDim2.new(0.4, 0, 1, 0)
-    Label.Position = UDim2.new(0, 10, 0, 0)
-    Label.BackgroundTransparency = 1
-    Label.Text = titleText
-    Label.TextColor3 = c_text
-    Label.Font = Enum.Font.GothamSemibold
-    Label.TextSize = 10
-    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Size = UDim2.new(0.4, 0, 1, 0); Label.Position = UDim2.new(0, 10, 0, 0)
+    Label.BackgroundTransparency = 1; Label.Text = titleText; Label.TextColor3 = c_text; Label:SetAttribute("ThemeRole", "text")
+    Label.Font = Enum.Font.GothamSemibold; Label.TextSize = 10; Label.TextXAlignment = Enum.TextXAlignment.Left
 
     local SelectBtn = Instance.new("TextButton", Frame)
-    SelectBtn.Size = UDim2.new(0.55, -10, 0, 24)
-    SelectBtn.Position = UDim2.new(0.45, 0, 0.5, -12)
-    SelectBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    SelectBtn.Text = "Select Option"
-    SelectBtn.TextColor3 = c_subtext
-    SelectBtn.Font = Enum.Font.GothamSemibold
-    SelectBtn.TextSize = 10
+    SelectBtn.Size = UDim2.new(0.55, -10, 0, 24); SelectBtn.Position = UDim2.new(0.45, 0, 0.5, -12)
+    SelectBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25); SelectBtn.Text = "Select Option"; SelectBtn.TextColor3 = c_subtext; SelectBtn:SetAttribute("ThemeRole", "subtext")
+    SelectBtn.Font = Enum.Font.GothamSemibold; SelectBtn.TextSize = 10
     Instance.new("UICorner", SelectBtn).CornerRadius = UDim.new(0, 4)
     Instance.new("UIStroke", SelectBtn).Color = Color3.fromRGB(50, 50, 60)
 
     local ListContainer = Instance.new("Frame", parent)
-    ListContainer.Size = UDim2.new(0.95, 0, 0, 100)
-    ListContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    ListContainer.Size = UDim2.new(0.95, 0, 0, 100); ListContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
     ListContainer.Visible = false
     Instance.new("UICorner", ListContainer).CornerRadius = UDim.new(0, 6)
     Instance.new("UIStroke", ListContainer).Color = Color3.fromRGB(50, 50, 60)
 
     local Scroll = Instance.new("ScrollingFrame", ListContainer)
-    Scroll.Size = UDim2.new(1, -4, 1, -4)
-    Scroll.Position = UDim2.new(0, 2, 0, 2)
-    Scroll.BackgroundTransparency = 1
-    Scroll.BorderSizePixel = 0
-    Scroll.ScrollBarThickness = 2
-    Scroll.ScrollBarImageColor3 = c_accent
-
+    Scroll.Size = UDim2.new(1, -4, 1, -4); Scroll.Position = UDim2.new(0, 2, 0, 2)
+    Scroll.BackgroundTransparency = 1; Scroll.BorderSizePixel = 0; Scroll.ScrollBarThickness = 2; Scroll.ScrollBarImageColor3 = c_accent
+    Scroll:SetAttribute("ThemeRole", "scroll")
     local ScrollLayout = Instance.new("UIListLayout", Scroll)
-    ScrollLayout.Padding = UDim.new(0, 2)
-    ScrollLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    ScrollLayout.Padding = UDim.new(0, 2); ScrollLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
-    SelectBtn.MouseButton1Click:Connect(function()
-        ListContainer.Visible = not ListContainer.Visible
-    end)
+    SelectBtn.MouseButton1Click:Connect(function() ListContainer.Visible = not ListContainer.Visible end)
 
     local function populate(newItems)
-        for _, child in ipairs(Scroll:GetChildren()) do
-            if child:IsA("TextButton") then child:Destroy() end
-        end
+        for _, child in ipairs(Scroll:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
         local ySize = 0
         for _, item in ipairs(newItems) do
             local btn = Instance.new("TextButton", Scroll)
-            btn.Size = UDim2.new(1, -4, 0, 24)
-            btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-            btn.Text = " " .. item
-            btn.TextColor3 = c_text
-            btn.Font = Enum.Font.Gotham
-            btn.TextSize = 10
-            btn.TextXAlignment = Enum.TextXAlignment.Left
+            btn.Size = UDim2.new(1, -4, 0, 24); btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+            btn.Text = " " .. item; btn.TextColor3 = c_text; btn:SetAttribute("ThemeRole", "text")
+            btn.Font = Enum.Font.Gotham; btn.TextSize = 10; btn.TextXAlignment = Enum.TextXAlignment.Left
             Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
-
             btn.MouseButton1Click:Connect(function()
-                SelectBtn.Text = item
-                SelectBtn.TextColor3 = c_text
-                ListContainer.Visible = false
+                SelectBtn.Text = item; SelectBtn.TextColor3 = c_text; SelectBtn:SetAttribute("ThemeRole", "text"); ListContainer.Visible = false
                 if onSelect then onSelect(item) end
             end)
             ySize = ySize + 26
         end
         Scroll.CanvasSize = UDim2.new(0, 0, 0, ySize)
-        local targetHeight = math.clamp(ySize + 4, 30, 120)
-        ListContainer.Size = UDim2.new(0.95, 0, 0, targetHeight)
+        ListContainer.Size = UDim2.new(0.95, 0, 0, math.clamp(ySize + 4, 30, 120))
     end
-
     populate(items)
     return Frame, populate, SelectBtn
 end
 
+local function CreateInfoLabel(parent, text)
+    local lbl = Instance.new("TextLabel", parent)
+    lbl.Size = UDim2.new(0.95, 0, 0, 20); lbl.BackgroundTransparency = 1
+    lbl.Text = text; lbl.TextColor3 = c_subtext; lbl:SetAttribute("ThemeRole", "subtext")
+    lbl.Font = Enum.Font.Gotham; lbl.TextSize = 9; lbl.TextWrapped = true; lbl.TextXAlignment = Enum.TextXAlignment.Left
+    return lbl
+end
+
 -- ========================================================
--- 6. MENU SETUP
+-- 6. MENU SETUP (OLD)
 -- ========================================================
 local DropElemental = CreateDropdown(TabAutomation, "Event Elemental TP")
 local UIStatus_Elemental = CreateStatusLabel(DropElemental)
-
 CreateToggle(DropElemental, "Enable Auto TP Cuaca", "AutoTP", function(state)
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if state then
-        if hrp and not posisiSimpanan then posisiSimpanan = hrp.CFrame end
-    else
-        isWeatherTPBusy = false
-        UIStatus_Elemental.Text = "SYSTEM PAUSED"; UIStatus_Elemental.TextColor3 = c_subtext
-    end
+    if state then if hrp and not posisiSimpanan then posisiSimpanan = hrp.CFrame end
+    else isWeatherTPBusy = false; UIStatus_Elemental.Text = "SYSTEM PAUSED"; UIStatus_Elemental.TextColor3 = c_subtext end
 end)
 
--- MENU SELECTOR MANUAL TP CUACA
 local elementalMapNames = {"Volcano (Gunung Berapi)", "Blizzard (Es / Ice Storm)", "Storm (Badai)"}
-local elementalKeyMap = {
-    ["Volcano (Gunung Berapi)"] = "Volcano",
-    ["Blizzard (Es / Ice Storm)"] = "Blizzard",
-    ["Storm (Badai)"] = "Storm"
-}
+local elementalKeyMap = {["Volcano (Gunung Berapi)"] = "Volcano", ["Blizzard (Es / Ice Storm)"] = "Blizzard", ["Storm (Badai)"] = "Storm"}
 local selectedElementalMapKey = nil
-
-local ElemFrame, ElemPopulate, ElemSelectBtn = CreateSelector(DropElemental, "Manual Weather TP", elementalMapNames, function(selText)
-    selectedElementalMapKey = elementalKeyMap[selText]
-end)
-
+CreateSelector(DropElemental, "Manual Weather TP", elementalMapNames, function(selText) selectedElementalMapKey = elementalKeyMap[selText] end)
 local BtnTPElementalManual = CreateButton(DropElemental, "Teleport Manual to Weather Map", function()
     if not selectedElementalMapKey then return end
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if hrp and spotKordinat[selectedElementalMapKey] then
         local targetCF = spotKordinat[selectedElementalMapKey]
-        hrp.CFrame = CFrame.new(targetCF.Position + Vector3.new(0, 3, 0)) * targetCF.Rotation
-        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        hrp.CFrame = CFrame.new(targetCF.Position + Vector3.new(0, 3, 0)) * targetCF.Rotation; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     end
 end)
-BtnTPElementalManual.BackgroundColor3 = c_sidebar
-BtnTPElementalManual.TextColor3 = c_accent
-BtnTPElementalManual.Font = Enum.Font.GothamBold
-local UIStrokeElemManual = Instance.new("UIStroke", BtnTPElementalManual)
-UIStrokeElemManual.Color = c_accent
-UIStrokeElemManual.Thickness = 1
+BtnTPElementalManual.BackgroundColor3 = c_sidebar; BtnTPElementalManual.TextColor3 = c_accent
+BtnTPElementalManual:SetAttribute("ThemeRole", "accent_text"); Instance.new("UIStroke", BtnTPElementalManual).Color = c_accent
 
--- ====== AUTOMATION: AUTO FISHING MANAGER ======
 local DropFishing = CreateDropdown(TabAutomation, "🎣 Auto Fishing Manager")
-
 local fishingModes = {"Map 1 (Rotate)", "Map 2 (Canyon)", "Dual Map (Switch)"}
 local FishingSelectorFrame, FishingPopulate, FishingSelectBtn = CreateSelector(DropFishing, "Farming Mode", fishingModes, function(sel)
-    ConfigData.SelectedFarmingMode = sel
-    SaveConfig()
-    
+    ConfigData.SelectedFarmingMode = sel; SaveConfig()
     if ConfigData.AutoFishingToggle then
-        ConfigData.AutoRotate = (sel == "Map 1 (Rotate)")
-        ConfigData.AutoMap2 = (sel == "Map 2 (Canyon)")
-        ConfigData.AutoDualMap = (sel == "Dual Map (Switch)")
+        ConfigData.AutoRotate = (sel == "Map 1 (Rotate)"); ConfigData.AutoMap2 = (sel == "Map 2 (Canyon)"); ConfigData.AutoDualMap = (sel == "Dual Map (Switch)")
     end
 end)
-
-UI_Updaters["SelectedFarmingMode"] = function(newState)
-    FishingSelectBtn.Text = newState
-    FishingSelectBtn.TextColor3 = c_text
-end
+UI_Updaters["SelectedFarmingMode"] = function(newState) FishingSelectBtn.Text = newState; FishingSelectBtn.TextColor3 = c_text end
 if not ConfigData.SelectedFarmingMode then ConfigData.SelectedFarmingMode = "Map 1 (Rotate)" end
-FishingSelectBtn.Text = ConfigData.SelectedFarmingMode
-FishingSelectBtn.TextColor3 = c_text
+FishingSelectBtn.Text = ConfigData.SelectedFarmingMode; FishingSelectBtn.TextColor3 = c_text
 
 CreateToggle(DropFishing, "Enable Auto Fishing", "AutoFishingToggle", function(state)
-    if state then
-        ConfigData.AutoRotate = (ConfigData.SelectedFarmingMode == "Map 1 (Rotate)")
-        ConfigData.AutoMap2 = (ConfigData.SelectedFarmingMode == "Map 2 (Canyon)")
-        ConfigData.AutoDualMap = (ConfigData.SelectedFarmingMode == "Dual Map (Switch)")
-    else
-        ConfigData.AutoRotate = false
-        ConfigData.AutoMap2 = false
-        ConfigData.AutoDualMap = false
-    end
+    if state then ConfigData.AutoRotate = (ConfigData.SelectedFarmingMode == "Map 1 (Rotate)"); ConfigData.AutoMap2 = (ConfigData.SelectedFarmingMode == "Map 2 (Canyon)"); ConfigData.AutoDualMap = (ConfigData.SelectedFarmingMode == "Dual Map (Switch)")
+    else ConfigData.AutoRotate = false; ConfigData.AutoMap2 = false; ConfigData.AutoDualMap = false end
 end)
-
 local UIStatus_Fishing = CreateStatusLabel(DropFishing)
-if not ConfigData.AutoFishingToggle then
-    UIStatus_Fishing.Text = "AUTO FISHING: OFF"
-    UIStatus_Fishing.TextColor3 = c_subtext
-end
+if not ConfigData.AutoFishingToggle then UIStatus_Fishing.Text = "AUTO FISHING: OFF"; UIStatus_Fishing.TextColor3 = c_subtext end
 
--- ====== BOOSTER & RAM ======
 local DropBooster = CreateDropdown(TabBooster, "🚀 Graphic & Performance Booster")
-local UIStatus_Booster = CreateStatusLabel(DropBooster)
-UIStatus_Booster.Text = "BOOSTER STATUS: ACTIVE"
-UIStatus_Booster.TextColor3 = Color3.fromRGB(50, 255, 100)
+local UIStatus_Booster = CreateStatusLabel(DropBooster); UIStatus_Booster.Text = "BOOSTER STATUS: ACTIVE"; UIStatus_Booster.TextColor3 = Color3.fromRGB(50, 255, 100)
+CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state) if UIStatus_Booster then UIStatus_Booster.Text = "FPS BOOSTER: " .. (state and "ON" or "OFF"); UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext end end)
+CreateToggle(DropBooster, "Clay Potato Mode", "ClayPotato", function(state) if state then EnableClayPotato() end; if UIStatus_Booster then UIStatus_Booster.Text = "CLAY POTATO: " .. (state and "ON" or "OFF"); UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext end end)
+CreateToggle(DropBooster, "Disable 3D Rendering", "Disable3D", function(state) RunService:Set3dRenderingEnabled(not state); if UIStatus_Booster then UIStatus_Booster.Text = "3D RENDERING: " .. (state and "DISABLED" or "ENABLED"); UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext end end)
+CreateToggle(DropBooster, "Clear Water", "ClearWater", function(state) if UIStatus_Booster then UIStatus_Booster.Text = "CLEAR WATER: " .. (state and "ON" or "OFF"); UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext end end)
+CreateToggle(DropBooster, "Limit 30 FPS", "Limit30FPS", function(state) if setfpscap then setfpscap(state and 30 or 60) end; if UIStatus_Booster then UIStatus_Booster.Text = "LIMIT 30 FPS: " .. (state and "ON" or "OFF"); UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext end end)
+CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state) if UIStatus_Booster then UIStatus_Booster.Text = "AUTO RAM: " .. (state and "ON" or "OFF"); UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext end end)
 
-CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state)
-    if UIStatus_Booster then
-        UIStatus_Booster.Text = "FPS BOOSTER: " .. (state and "ON" or "OFF")
-        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
-    end
-end)
-
-CreateToggle(DropBooster, "Clay Potato Mode", "ClayPotato", function(state)
-    if state then EnableClayPotato() end
-    if UIStatus_Booster then
-        UIStatus_Booster.Text = "CLAY POTATO: " .. (state and "ON" or "OFF")
-        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
-    end
-end)
-
-CreateToggle(DropBooster, "Disable 3D Rendering", "Disable3D", function(state)
-    RunService:Set3dRenderingEnabled(not state)
-    if UIStatus_Booster then
-        UIStatus_Booster.Text = "3D RENDERING: " .. (state and "DISABLED" or "ENABLED")
-        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
-    end
-end)
-
-CreateToggle(DropBooster, "Clear Water", "ClearWater", function(state)
-    if UIStatus_Booster then
-        UIStatus_Booster.Text = "CLEAR WATER: " .. (state and "ON" or "OFF")
-        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
-    end
-end)
-
-CreateToggle(DropBooster, "Limit 30 FPS", "Limit30FPS", function(state)
-    if setfpscap then setfpscap(state and 30 or 60) end
-    if UIStatus_Booster then
-        UIStatus_Booster.Text = "LIMIT 30 FPS: " .. (state and "ON" or "OFF")
-        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
-    end
-end)
-
-CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state)
-    if UIStatus_Booster then
-        UIStatus_Booster.Text = "AUTO RAM: " .. (state and "ON" or "OFF")
-        UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
-    end
-end)
-
--- ====== DISCORD WEBHOOKS ======
 local DropGlobalWeb = CreateDropdown(TabWebhooks, "🔗 Global Webhook Configuration")
 CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL", function(txt) end)
-
 local DropWebToggles = CreateDropdown(TabWebhooks, "⚙️ Active Webhook Features")
 UIStatus_PlayerMon = CreateStatusLabel(DropWebToggles)
-
-local trackerInterval = 3600
-local trackerRemaining = 0
-
+local trackerInterval = 3600; local trackerRemaining = 0
 CreateToggle(DropWebToggles, "Player Tracker Webhook", "WebhookPlayer", function(state)
     isTrackerActive = state
-    if state then
-        trackerRemaining = trackerInterval
-    else
-        trackerRemaining = 0
-        trackerUIPaused = false
-    end
-    if UIStatus_PlayerMon then
-        UIStatus_PlayerMon.Text = state and "TRACKER: ON" or "TRACKER: OFF"
-        UIStatus_PlayerMon.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
-    end
+    if state then trackerRemaining = trackerInterval else trackerRemaining = 0; trackerUIPaused = false end
+    if UIStatus_PlayerMon then UIStatus_PlayerMon.Text = state and "TRACKER: ON" or "TRACKER: OFF"; UIStatus_PlayerMon.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext end
 end)
-
 CreateToggle(DropWebToggles, "Join / Leave Alert Webhook", "WebhookJoinLeave", function(state)
-    if UIStatus_PlayerMon then
-        UIStatus_PlayerMon.Text = state and "JOIN/LEAVE ALERT: ON" or "JOIN/LEAVE ALERT: OFF"
-        UIStatus_PlayerMon.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext
-    end
+    if UIStatus_PlayerMon then UIStatus_PlayerMon.Text = state and "JOIN/LEAVE ALERT: ON" or "JOIN/LEAVE ALERT: OFF"; UIStatus_PlayerMon.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext end
 end)
-
 local DropWebTest = CreateDropdown(TabWebhooks, "🧪 Test Webhook Triggers")
 CreateButton(DropWebTest, "🚀 Kirim Test Player Tracker Manual", function() SendPlayerList(true) end)
 
--- ========================================================
--- 6.5. MENU TELEPORT MAP & PLAYER
--- ========================================================
 local DropMapTP = CreateDropdown(TabTeleport, "Teleport to Island")
-
 local MapLocations = {
-    {Name = "Hutan Kuno", Pos = Vector3.new(1482.70, 11.14, -300.65), Rot = -30.84},
-    {Name = "Kedalaman Esoterik", Pos = Vector3.new(3210.66, -1302.86, 1407.32), Rot = 18.56},
-    {Name = "Kedalaman Kristal", Pos = Vector3.new(5703.96, -905.21, 15328.31), Rot = -161.77},
-    {Name = "Ngarai Tembaga (Spot 1)", Pos = Vector3.new(-4171.59, 3.23, 566.77), Rot = 148.32},
-    {Name = "Ngarai Tembaga (Spot 2)", Pos = Vector3.new(-4164.58, 59.63, 409.79), Rot = 104.76},
-    {Name = "Pulau Kawah", Pos = Vector3.new(978.88, 47.48, 5086.54), Rot = 127.91},
-    {Name = "Runtuhan Kuno", Pos = Vector3.new(6089.14, -585.92, 4639.69), Rot = 142.21},
-    {Name = "Tambang Canyon Tembaga", Pos = Vector3.new(-4031.78, -544.08, 577.91), Rot = 25.84},
+    {Name = "Hutan Kuno", Pos = Vector3.new(1482.70, 11.14, -300.65), Rot = -30.84}, {Name = "Kedalaman Esoterik", Pos = Vector3.new(3210.66, -1302.86, 1407.32), Rot = 18.56},
+    {Name = "Kedalaman Kristal", Pos = Vector3.new(5703.96, -905.21, 15328.31), Rot = -161.77}, {Name = "Ngarai Tembaga (Spot 1)", Pos = Vector3.new(-4171.59, 3.23, 566.77), Rot = 148.32},
+    {Name = "Ngarai Tembaga (Spot 2)", Pos = Vector3.new(-4164.58, 59.63, 409.79), Rot = 104.76}, {Name = "Pulau Kawah", Pos = Vector3.new(978.88, 47.48, 5086.54), Rot = 127.91},
+    {Name = "Runtuhan Kuno", Pos = Vector3.new(6089.14, -585.92, 4639.69), Rot = 142.21}, {Name = "Tambang Canyon Tembaga", Pos = Vector3.new(-4031.78, -544.08, 577.91), Rot = 25.84},
     {Name = "Terumbu Karang", Pos = Vector3.new(-3028.41, 2.51, 2269.79), Rot = 84.12}
 }
-
-local selectedMap = nil
-local mapNames = {}
+local selectedMap = nil; local mapNames = {}
 for _, map in ipairs(MapLocations) do table.insert(mapNames, map.Name) end
-
-local MapFrame, MapPopulate, MapSelectBtn = CreateSelector(DropMapTP, "Select Island", mapNames, function(sel)
-    selectedMap = sel
-end)
-
+CreateSelector(DropMapTP, "Select Island", mapNames, function(sel) selectedMap = sel end)
 local BtnTeleportMap = CreateButton(DropMapTP, "Teleport", function()
     if not selectedMap then return end
     for _, map in ipairs(MapLocations) do
         if map.Name == selectedMap then
             local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                hrp.CFrame = CFrame.new(map.Pos) * CFrame.Angles(0, math.rad(map.Rot), 0)
-                hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
-            end
+            if hrp then hrp.CFrame = CFrame.new(map.Pos) * CFrame.Angles(0, math.rad(map.Rot), 0); hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
             break
         end
     end
 end)
-BtnTeleportMap.BackgroundColor3 = c_sidebar
-BtnTeleportMap.TextColor3 = c_accent
-BtnTeleportMap.Font = Enum.Font.GothamBold
-local UIStrokeMap = Instance.new("UIStroke", BtnTeleportMap)
-UIStrokeMap.Color = c_accent
-UIStrokeMap.Thickness = 1
+BtnTeleportMap.BackgroundColor3 = c_sidebar; BtnTeleportMap.TextColor3 = c_accent
+BtnTeleportMap:SetAttribute("ThemeRole", "accent_text"); Instance.new("UIStroke", BtnTeleportMap).Color = c_accent
 
 local DropPlayerTP = CreateDropdown(TabTeleport, "Teleport to Player")
-
-local playerMap = {}
-local selectedPlayerObj = nil
-local PlayerFrame, PlayerPopulate, PlayerSelectBtn = CreateSelector(DropPlayerTP, "Select Player", {}, function(selText)
-    selectedPlayerObj = playerMap[selText]
-end)
-
+local playerMap = {}; local selectedPlayerObj = nil
+local PlayerFrame, PlayerPopulate, PlayerSelectBtn = CreateSelector(DropPlayerTP, "Select Player", {}, function(selText) selectedPlayerObj = playerMap[selText] end)
 local BtnTeleportPlayer = CreateButton(DropPlayerTP, "Teleport to selected Player", function()
     if not selectedPlayerObj then return end
     local myHrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     local targetHrp = selectedPlayerObj.Character and selectedPlayerObj.Character:FindFirstChild("HumanoidRootPart")
-    if myHrp and targetHrp then
-        myHrp.CFrame = targetHrp.CFrame
-        myHrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-    end
+    if myHrp and targetHrp then myHrp.CFrame = targetHrp.CFrame; myHrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0) end
 end)
-BtnTeleportPlayer.BackgroundColor3 = c_sidebar
-BtnTeleportPlayer.TextColor3 = c_accent
-BtnTeleportPlayer.Font = Enum.Font.GothamBold
-local UIStrokePlayer = Instance.new("UIStroke", BtnTeleportPlayer)
-UIStrokePlayer.Color = c_accent
-UIStrokePlayer.Thickness = 1
-
+BtnTeleportPlayer.BackgroundColor3 = c_sidebar; BtnTeleportPlayer.TextColor3 = c_accent
+BtnTeleportPlayer:SetAttribute("ThemeRole", "accent_text"); Instance.new("UIStroke", BtnTeleportPlayer).Color = c_accent
 local function LoadPlayers()
-    playerMap = {}
-    local pDisplayNames = {}
+    playerMap = {}; local pDisplayNames = {}
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= player then
-            local pText = p.DisplayName .. " (@" .. p.Name .. ")"
-            table.insert(pDisplayNames, pText)
-            playerMap[pText] = p
-        end
+        if p ~= player then local pText = p.DisplayName .. " (@" .. p.Name .. ")"; table.insert(pDisplayNames, pText); playerMap[pText] = p end
     end
-    PlayerPopulate(pDisplayNames)
-    selectedPlayerObj = nil
-    PlayerSelectBtn.Text = "Select Option"
-    PlayerSelectBtn.TextColor3 = c_subtext
+    PlayerPopulate(pDisplayNames); selectedPlayerObj = nil; PlayerSelectBtn.Text = "Select Option"; PlayerSelectBtn.TextColor3 = c_subtext
 end
+CreateButton(DropPlayerTP, "Refresh Player List", LoadPlayers); LoadPlayers()
 
-local BtnRefreshPlayer = CreateButton(DropPlayerTP, "Refresh Player List", LoadPlayers)
-LoadPlayers() 
-
--- ========================================================
--- SAVED LOCATION TELEPORT
--- ========================================================
 local DropSavedTP = CreateDropdown(TabTeleport, "📌 Custom Saved Location")
 local savedCustomLocation = nil
-
-local BtnSaveLoc
-BtnSaveLoc = CreateButton(DropSavedTP, "Save Current Location", function()
+local BtnSaveLoc = CreateButton(DropSavedTP, "Save Current Location", function()
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        savedCustomLocation = hrp.CFrame
-        BtnSaveLoc.Text = "Location Saved!"
-        BtnSaveLoc.TextColor3 = Color3.fromRGB(50, 255, 100)
-    else
-        BtnSaveLoc.Text = "Player Not Found!"
-        BtnSaveLoc.TextColor3 = Color3.fromRGB(255, 100, 100)
-    end
-    task.delay(2, function()
-        BtnSaveLoc.Text = "Save Current Location"
-        BtnSaveLoc.TextColor3 = c_text
-    end)
+    if hrp then savedCustomLocation = hrp.CFrame; BtnSaveLoc.Text = "Location Saved!"; BtnSaveLoc.TextColor3 = Color3.fromRGB(50, 255, 100)
+    else BtnSaveLoc.Text = "Player Not Found!"; BtnSaveLoc.TextColor3 = Color3.fromRGB(255, 100, 100) end
+    task.delay(2, function() BtnSaveLoc.Text = "Save Current Location"; BtnSaveLoc.TextColor3 = c_text end)
 end)
-
-local BtnTeleportLoc
-BtnTeleportLoc = CreateButton(DropSavedTP, "Teleport to Saved", function()
+local BtnTeleportLoc = CreateButton(DropSavedTP, "Teleport to Saved", function()
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if savedCustomLocation and hrp then
-        hrp.CFrame = savedCustomLocation
-        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
-        BtnTeleportLoc.Text = "Teleported!"
-        BtnTeleportLoc.TextColor3 = Color3.fromRGB(100, 200, 255)
-    else
-        BtnTeleportLoc.Text = "No Save Found!"
-        BtnTeleportLoc.TextColor3 = Color3.fromRGB(255, 100, 100)
-    end
-    task.delay(2, function()
-        BtnTeleportLoc.Text = "Teleport to Saved"
-        BtnTeleportLoc.TextColor3 = c_text
-    end)
+    if savedCustomLocation and hrp then hrp.CFrame = savedCustomLocation; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0); BtnTeleportLoc.Text = "Teleported!"; BtnTeleportLoc.TextColor3 = Color3.fromRGB(100, 200, 255)
+    else BtnTeleportLoc.Text = "No Save Found!"; BtnTeleportLoc.TextColor3 = Color3.fromRGB(255, 100, 100) end
+    task.delay(2, function() BtnTeleportLoc.Text = "Teleport to Saved"; BtnTeleportLoc.TextColor3 = c_text end)
 end)
-
-local BtnResetLoc
-BtnResetLoc = CreateButton(DropSavedTP, "Reset Saved Location", function()
-    savedCustomLocation = nil
-    BtnResetLoc.Text = "Location Reset!"
-    BtnResetLoc.TextColor3 = Color3.fromRGB(255, 200, 50)
-    task.delay(2, function()
-        BtnResetLoc.Text = "Reset Saved Location"
-        BtnResetLoc.TextColor3 = c_text
-    end)
+local BtnResetLoc = CreateButton(DropSavedTP, "Reset Saved Location", function()
+    savedCustomLocation = nil; BtnResetLoc.Text = "Location Reset!"; BtnResetLoc.TextColor3 = Color3.fromRGB(255, 200, 50)
+    task.delay(2, function() BtnResetLoc.Text = "Reset Saved Location"; BtnResetLoc.TextColor3 = c_text end)
 end)
-
 CreateToggle(DropSavedTP, "Auto Teleport on Spawn", "AutoTeleportSpawn", function(state) end)
 
 player.CharacterAdded:Connect(function(char)
     if ConfigData.AutoTeleportSpawn and savedCustomLocation then
         task.spawn(function()
             local hrp = char:WaitForChild("HumanoidRootPart", 5)
-            if hrp then
-                task.wait(0.5)
-                hrp.CFrame = savedCustomLocation
-                hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
-            end
+            if hrp then task.wait(0.5); hrp.CFrame = savedCustomLocation; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
         end)
     end
 end)
 
--- ========================================================
--- CONFIG MANAGER
--- ========================================================
 local DropConfigSystem = CreateDropdown(TabConfig, "Configuration Manager")
 CreateButton(DropConfigSystem, "💾 Save UI Settings Manual", function() SaveConfig() end)
 local BtnReset = CreateButton(DropConfigSystem, "⚠️ Reset Settingan (Tanpa DC)", function() end)
@@ -1110,20 +939,210 @@ BtnReset.MouseButton1Click:Connect(function()
 end)
 
 -- ==========================================================
+-- [ NEW ] 6.5. PLAYER & SERVER MODS (UPDATE THREAD)
+-- ==========================================================
+local DropSafety = CreateDropdown(TabPlayerMods, "🛡️ Server & Safety Mods")
+CreateToggle(DropSafety, "Staff Detector & Auto Hop", "StaffDetector", function(state) end)
+CreateToggle(DropSafety, "Auto Reconnect (Anti DC/Kick)", "AutoReconnect", function(state) end)
+CreateButton(DropSafety, "🔄 Rejoin Server (Sama)", function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player) end)
+CreateButton(DropSafety, "🌍 Server Hop (Lainnya)", function()
+    local Http = game:GetService("HttpService")
+    local TPS = game:GetService("TeleportService")
+    local Api = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+    pcall(function()
+        local data = Http:JSONDecode(game:HttpGet(Api))
+        if data and data.data then
+            for _, srv in ipairs(data.data) do
+                if srv.playing < srv.maxPlayers and srv.id ~= game.JobId then
+                    TPS:TeleportToPlaceInstance(game.PlaceId, srv.id, player); break
+                end
+            end
+        end
+    end)
+end)
+
+local DropCamera = CreateDropdown(TabPlayerMods, "🎥 Camera System")
+CreateInfoLabel(DropCamera, "Info PC: Tekan F3 untuk on/off. Gerak [WASD], Naik [E/Space], Turun [Q/Shift].")
+CreateInfoLabel(DropCamera, "Info Mobile: Gunakan Joystick layar untuk gerak, usap layar untuk putar kamera.")
+CreateToggle(DropCamera, "Enable Freecam", "Freecam", function(state)
+    local cam = workspace.CurrentCamera
+    if state then
+        if not workspace:FindFirstChild("ShadowFreecamPart") then
+            local fc = Instance.new("Part", workspace); fc.Name = "ShadowFreecamPart"; fc.Anchored = true; fc.CanCollide = false; fc.Transparency = 1; fc.Size = Vector3.new(1,1,1)
+            local char = player.Character; if char and char:FindFirstChild("Head") then fc.CFrame = char.Head.CFrame end
+        end
+        cam.CameraSubject = workspace:FindFirstChild("ShadowFreecamPart")
+    else
+        local char = player.Character; if char and char:FindFirstChild("Humanoid") then cam.CameraSubject = char.Humanoid end
+        local fc = workspace:FindFirstChild("ShadowFreecamPart"); if fc then fc:Destroy() end
+    end
+end)
+CreateToggle(DropCamera, "Unlimited Zoom", "UnlimitedZoom", function(state)
+    player.CameraMaxZoomDistance = state and math.huge or 128
+end)
+
+local DropPlayer = CreateDropdown(TabPlayerMods, "🦸 Player Feature")
+CreateTextBox(DropPlayer, "Walk Speed (Default: 16)", "SprintSpeed", function(txt) end)
+CreateTextBox(DropPlayer, "Fly Speed (Default: 50)", "FlySpeed", function(txt) end)
+CreateToggle(DropPlayer, "Enable Fly Mode", "FlyMode", function(state) end)
+CreateToggle(DropPlayer, "Infinite Jump", "InfiniteJump", function(state) end)
+CreateToggle(DropPlayer, "No Clip (Tembus Objek)", "NoClip", function(state) end)
+CreateToggle(DropPlayer, "Lava Kill Immunity", "LavaImmunity", function(state) end)
+CreateToggle(DropPlayer, "Hide Character (Invisible)", "Invisible", function(state)
+    local char = player.Character; if not char then return end
+    for _, v in pairs(char:GetDescendants()) do
+        if v:IsA("BasePart") and v.Name ~= "HumanoidRootPart" then v.Transparency = state and 1 or 0
+        elseif v:IsA("Decal") then v.Transparency = state and 1 or 0 end
+    end
+end)
+CreateToggle(DropPlayer, "Hide Stats (Fake Name/Lv)", "HideStats", function(state) end)
+
+local DropTheme = CreateDropdown(TabPlayerMods, "🎨 Tema UI Panel")
+CreateSelector(DropTheme, "Pilih Tema", {"Default", "Elegant Gold"}, function(sel)
+    ConfigData.SelectedTheme = sel; SaveConfig(); ApplyTheme()
+end)
+
+-- ==========================================================
 -- 7. BACKGROUND ENGINES & THREADS
+-- ==========================================================
+-- Apply Theme saat pertama kali run
+ApplyTheme()
+player.CameraMaxZoomDistance = ConfigData.UnlimitedZoom and math.huge or 128
+
+-- Infinite Jump Thread
+UserInputService.JumpRequest:Connect(function()
+    if ConfigData.InfiniteJump and player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
+        player.Character:FindFirstChildOfClass("Humanoid"):ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+-- Freecam PC Toggle Handler (F3)
+UserInputService.InputBegan:Connect(function(input, gp)
+    if not gp and input.KeyCode == Enum.KeyCode.F3 then
+        ConfigData.Freecam = not ConfigData.Freecam
+        if UI_Updaters["Freecam"] then UI_Updaters["Freecam"](ConfigData.Freecam) end
+    end
+end)
+
+-- Mods Loop
+RunService.Stepped:Connect(function()
+    local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    
+    -- NoClip
+    if ConfigData.NoClip and char then
+        for _, v in pairs(char:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide = false end end
+    end
+    
+    -- Walk Speed
+    if hum then pcall(function() hum.WalkSpeed = tonumber(ConfigData.SprintSpeed) or 16 end) end
+    
+    -- Fly Mode
+    if ConfigData.FlyMode and hrp and hum then
+        local cam = workspace.CurrentCamera
+        local ctrl = {f = 0, b = 0, l = 0, r = 0}
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then ctrl.f = 1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then ctrl.b = -1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then ctrl.l = -1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then ctrl.r = 1 end
+        
+        local flySpeed = tonumber(ConfigData.FlySpeed) or 50
+        hum.PlatformStand = true
+        hrp.Velocity = (cam.CFrame.LookVector * (ctrl.f + ctrl.b) + cam.CFrame.RightVector * (ctrl.l + ctrl.r)) * flySpeed
+        
+        local bg = hrp:FindFirstChild("ShadowFlyGyro") or Instance.new("BodyGyro", hrp)
+        bg.Name = "ShadowFlyGyro"; bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9); bg.CFrame = cam.CFrame
+    elseif hum and hum.PlatformStand then
+        hum.PlatformStand = false
+        if hrp:FindFirstChild("ShadowFlyGyro") then hrp.ShadowFlyGyro:Destroy() end
+    end
+
+    -- Freecam Movement Logic
+    if ConfigData.Freecam then
+        local fc = workspace:FindFirstChild("ShadowFreecamPart")
+        if fc then
+            local cam = workspace.CurrentCamera
+            local spd = 2; local mov = Vector3.new()
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then mov = mov + cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then mov = mov - cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then mov = mov - cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then mov = mov + cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.E) or UserInputService:IsKeyDown(Enum.KeyCode.Space) then mov = mov + Vector3.new(0,1,0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Q) or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then mov = mov - Vector3.new(0,1,0) end
+            fc.CFrame = fc.CFrame + (mov * spd)
+        end
+    end
+end)
+
+-- Lava Immunity & Hide Stats
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if ConfigData.LavaImmunity then
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v:IsA("BasePart") and (string.find(string.lower(v.Name), "lava") or v.Material == Enum.Material.Neon) then
+                    v.CanTouch = false
+                end
+            end
+        end
+        if ConfigData.HideStats and player.Character then
+            local head = player.Character:FindFirstChild("Head")
+            if head then
+                for _, gui in pairs(head:GetChildren()) do
+                    if gui:IsA("BillboardGui") then
+                        for _, text in pairs(gui:GetDescendants()) do
+                            if text:IsA("TextLabel") then
+                                if string.find(text.Text, player.Name) or string.find(text.Text, player.DisplayName) then text.Text = "HiddenShadow" end
+                                if string.find(string.lower(text.Text), "lv") then text.Text = "Lv. 999" end
+                            elseif text:IsA("ImageLabel") then text.Visible = false end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- Staff Detector
+Players.PlayerAdded:Connect(function(p)
+    if ConfigData.StaffDetector then
+        local isStaff = false
+        if p:GetRankInGroup(game.CreatorId) >= 200 then isStaff = true end
+        local rName = string.lower(p:GetRoleInGroup(game.CreatorId) or "")
+        if string.find(rName, "admin") or string.find(rName, "mod") or string.find(rName, "staff") then isStaff = true end
+        if isStaff then
+            pcall(function()
+                local Http = game:GetService("HttpService"); local TPS = game:GetService("TeleportService")
+                local Api = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+                local data = Http:JSONDecode(game:HttpGet(Api))
+                for _, srv in ipairs(data.data) do
+                    if srv.playing < srv.maxPlayers and srv.id ~= game.JobId then TPS:TeleportToPlaceInstance(game.PlaceId, srv.id, player); break end
+                end
+            end)
+        end
+    end
+end)
+
+-- Auto Reconnect (Error Prompt Listener)
+CoreGui:FindFirstChild("RobloxPromptGui").promptOverlay.ChildAdded:Connect(function(child)
+    if ConfigData.AutoReconnect and child.Name == "ErrorPrompt" then
+        task.wait(2); TeleportService:Teleport(game.PlaceId, player)
+    end
+end)
+
+-- ==========================================================
+-- ORIGINAL AUTOMATION THREADS (TIDAK DISENTUH)
 -- ==========================================================
 task.spawn(function()
     while true do
         task.wait(1)
         if isTrackerActive then
             if trackerRemaining <= 0 then
-                SendPlayerList(false)
-                trackerRemaining = trackerInterval
+                SendPlayerList(false); trackerRemaining = trackerInterval
             else
                 trackerRemaining = trackerRemaining - 1
                 if not trackerUIPaused and UIStatus_PlayerMon then
-                    local menit = math.floor(trackerRemaining / 60)
-                    local detik = trackerRemaining % 60
+                    local menit = math.floor(trackerRemaining / 60); local detik = trackerRemaining % 60
                     UIStatus_PlayerMon.Text = string.format("TRACKER AKTIF : NEXT SEND %02d:%02d", menit, detik)
                     UIStatus_PlayerMon.TextColor3 = Color3.fromRGB(50, 255, 100)
                 end
@@ -1133,29 +1152,20 @@ task.spawn(function()
 end)
 
 player.Idled:Connect(function() if ConfigData.AntiAFK then VirtualUser:CaptureController(); VirtualUser:ClickButton2(Vector2.new()) end end)
-
 task.spawn(function() while true do task.wait(60); if ConfigData.AutoRAM then collectgarbage("collect") end end end)
 
--- ====== [THREAD 1]: AUTO TP CUACA (HIGH PRIORITY HANDLER) ======
+-- ====== [THREAD 1]: AUTO TP CUACA ======
 task.spawn(function()
     while true do
         task.wait(1)
         if ConfigData.AutoTP then
             local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if not hrp then 
-                isWeatherTPBusy = false
-                continue 
-            end
+            if not hrp then isWeatherTPBusy = false; continue end
             local schedule = GetEventScheduleWIB()
 
             if schedule.state == "COOLDOWN" then
-                isWeatherTPBusy = false -- Priority OFF
-                
-                -- Hanya kembali ke posisi simpanan jika Auto Fishing TIDAK aktif
-                if not ConfigData.AutoFishingToggle then
-                    PulangKeSetPos()
-                end
-
+                isWeatherTPBusy = false 
+                if not ConfigData.AutoFishingToggle then PulangKeSetPos() end
                 while ConfigData.AutoTP do
                     local realTimeSchedule = GetEventScheduleWIB()
                     if realTimeSchedule.state == "ACTIVE" then break end 
@@ -1164,14 +1174,12 @@ task.spawn(function()
                     task.wait(1)
                 end
             elseif schedule.state == "ACTIVE" then
-                UIStatus_Elemental.Text = "MENUJU PAPAN..."
-                UIStatus_Elemental.TextColor3 = Color3.fromRGB(100, 200, 255)
+                UIStatus_Elemental.Text = "MENUJU PAPAN..."; UIStatus_Elemental.TextColor3 = Color3.fromRGB(100, 200, 255)
                 hrp.CFrame = spotKordinat.Board; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); task.wait(1.5)
                 
                 local cuacaAktif = GetWeatherIconOnly()
                 if cuacaAktif then
-                    local targetCFrame = spotKordinat[cuacaAktif]
-                    isWeatherTPBusy = true -- Lock Priority ON!
+                    local targetCFrame = spotKordinat[cuacaAktif]; isWeatherTPBusy = true
                     while ConfigData.AutoTP do
                         local realTimeSchedule = GetEventScheduleWIB()
                         if realTimeSchedule.state == "COOLDOWN" then break end 
@@ -1184,10 +1192,9 @@ task.spawn(function()
                         end
                         task.wait(1)
                     end
-                    isWeatherTPBusy = false -- Priority Release
-                else
                     isWeatherTPBusy = false
-                    UIStatus_Elemental.Text = "MENUNGGU ICON CUACA..."; UIStatus_Elemental.TextColor3 = c_subtext; task.wait(1)
+                else
+                    isWeatherTPBusy = false; UIStatus_Elemental.Text = "MENUNGGU ICON CUACA..."; UIStatus_Elemental.TextColor3 = c_subtext; task.wait(1)
                 end
             end
         else
@@ -1196,7 +1203,7 @@ task.spawn(function()
     end
 end)
 
--- ====== [THREAD 2]: AUTO ROTATE MAP 1 (PRIORITY COMPATIBLE) ======
+-- ====== [THREAD 2]: AUTO ROTATE MAP 1 ======
 task.spawn(function()
     while true do
         if ConfigData.AutoRotate and not ConfigData.AutoDualMap then
@@ -1205,7 +1212,6 @@ task.spawn(function()
                 local targetAngle = math.rad(poolAngles[currentPoolIndex])
                 local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
                 
-                -- Set posisi awal jika cuaca tidak busy
                 if not isWeatherTPBusy then
                     for i = 1, 6 do
                         if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
@@ -1215,76 +1221,51 @@ task.spawn(function()
                 
                 currentPoolIndex = currentPoolIndex + 1; if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
                 
-                local elapsed = 0
-                local wasBusy = isWeatherTPBusy
+                local elapsed = 0; local wasBusy = isWeatherTPBusy
                 
                 while elapsed < rotateInterval and ConfigData.AutoRotate and not ConfigData.AutoDualMap do
-                    if isWeatherTPBusy then
-                        wasBusy = true -- Menandakan sedang ditimpa event cuaca
+                    if isWeatherTPBusy then wasBusy = true
                     elseif wasBusy then
-                        wasBusy = false -- Event cuaca selesai, langsung resume ke target spot
-                        if hrp and hrp.Parent then
-                            hrp.CFrame = targetCFrame
-                            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                            hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                        end
+                        wasBusy = false 
+                        if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
                     end
 
                     local sisaDetik = rotateInterval - elapsed
                     if UIStatus_Fishing then
-                        if isWeatherTPBusy then
-                            UIStatus_Fishing.Text = "MAP 1 ROTATE: PAUSED (AUTO TP CUACA PRIORITY)"
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        else
-                            UIStatus_Fishing.Text = "MAP 1 ROTATE: " .. formatSecondsToText(sisaDetik)
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
-                        end
+                        if isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 1 ROTATE: PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        else UIStatus_Fishing.Text = "MAP 1 ROTATE: " .. formatSecondsToText(sisaDetik); UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100) end
                     end
-                    task.wait(1); elapsed = elapsed + 1 -- Timer tetap berjalan di background
+                    task.wait(1); elapsed = elapsed + 1
                 end
-            else
-                task.wait(1)
-            end
-        else
-            task.wait(1)
-        end
+            else task.wait(1) end
+        else task.wait(1) end
     end
 end)
 
--- ====== [THREAD 3]: AUTO MAP 2 CANYON (PRIORITY COMPATIBLE) ======
+-- ====== [THREAD 3]: AUTO MAP 2 CANYON ======
 task.spawn(function()
     while true do
         if ConfigData.AutoMap2 and not ConfigData.AutoDualMap then
             local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 if not isWeatherTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then
-                    hrp.CFrame = map2CFrame
-                    hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
-                    hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                    hrp.CFrame = map2CFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0); hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
                 end
                 if UIStatus_Fishing then
-                    if isWeatherTPBusy then
-                        UIStatus_Fishing.Text = "MAP 2 ACTIVE: PAUSED (AUTO TP CUACA PRIORITY)"
-                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                    else
-                        UIStatus_Fishing.Text = "MAP 2 ACTIVE (STAY STAYING)"
-                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
-                    end
+                    if isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 2 ACTIVE: PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                    else UIStatus_Fishing.Text = "MAP 2 ACTIVE (STAY STAYING)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100) end
                 end
             end
             task.wait(1)
-        else
-            task.wait(1)
-        end
+        else task.wait(1) end
     end
 end)
 
--- ====== [THREAD 4]: AUTO DUAL MAP SWITCH (PRIORITY COMPATIBLE) ======
+-- ====== [THREAD 4]: AUTO DUAL MAP SWITCH ======
 task.spawn(function()
     while true do
         if ConfigData.AutoDualMap then
             local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            
             if ConfigData.AutoDualMap then
                 local map1Timer = 0
                 while map1Timer < dualMapInterval and ConfigData.AutoDualMap do
@@ -1293,39 +1274,23 @@ task.spawn(function()
                     local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
 
                     if hrp and not isWeatherTPBusy then
-                        for i = 1, 4 do
-                            if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
-                            task.wait(0.05)
-                        end
+                        for i = 1, 4 do if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end; task.wait(0.05) end
                     end
-                    
                     currentPoolIndex = currentPoolIndex + 1
                     if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
 
-                    local subTimer = 0
-                    local wasBusy = isWeatherTPBusy
+                    local subTimer = 0; local wasBusy = isWeatherTPBusy
                     
                     while subTimer < rotateInterval and map1Timer < dualMapInterval and ConfigData.AutoDualMap do
-                        if isWeatherTPBusy then
-                            wasBusy = true
-                        elseif wasBusy then
-                            wasBusy = false -- Resume posisi setelah event cuaca
-                            if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
-                        end
+                        if isWeatherTPBusy then wasBusy = true
+                        elseif wasBusy then wasBusy = false; if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end end
 
                         local sisaPindah = dualMapInterval - map1Timer
                         if UIStatus_Fishing then
-                            if isWeatherTPBusy then
-                                UIStatus_Fishing.Text = "MAP 1 (ROTATING): PAUSED (AUTO TP CUACA PRIORITY)"
-                                UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                            else
-                                UIStatus_Fishing.Text = "MAP 1 (ROTATING) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
-                                UIStatus_Fishing.TextColor3 = Color3.fromRGB(100, 200, 255)
-                            end
+                            if isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 1 (ROTATING): PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                            else UIStatus_Fishing.Text = "MAP 1 (ROTATING) | SWITCH IN: " .. formatSecondsToText(sisaPindah); UIStatus_Fishing.TextColor3 = Color3.fromRGB(100, 200, 255) end
                         end
-                        task.wait(1)
-                        subTimer = subTimer + 1 -- Timer jalan terus
-                        map1Timer = map1Timer + 1
+                        task.wait(1); subTimer = subTimer + 1; map1Timer = map1Timer + 1
                     end
                 end
             end
@@ -1334,37 +1299,21 @@ task.spawn(function()
                 local map2Timer = 0
                 hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                 if hrp and not isWeatherTPBusy then
-                    for i = 1, 6 do
-                        hrp.CFrame = map2CFrame
-                        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
-                        hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
-                        task.wait(0.05)
-                    end
+                    for i = 1, 6 do hrp.CFrame = map2CFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0); hrp.AssemblyAngularVelocity = Vector3.new(0,0,0); task.wait(0.05) end
                 end
 
                 while map2Timer < dualMapInterval and ConfigData.AutoDualMap do
                     hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp and not isWeatherTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then
-                        hrp.CFrame = map2CFrame
-                        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
-                    end
+                    if hrp and not isWeatherTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then hrp.CFrame = map2CFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
 
                     local sisaPindah = dualMapInterval - map2Timer
                     if UIStatus_Fishing then
-                        if isWeatherTPBusy then
-                            UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF): PAUSED (AUTO TP CUACA PRIORITY)"
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        else
-                            UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        end
+                        if isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF): PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        else UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF) | SWITCH IN: " .. formatSecondsToText(sisaPindah); UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50) end
                     end
-                    task.wait(1)
-                    map2Timer = map2Timer + 1 -- Timer jalan terus
+                    task.wait(1); map2Timer = map2Timer + 1
                 end
             end
-        else
-            task.wait(1)
-        end
+        else task.wait(1) end
     end
 end)
