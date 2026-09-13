@@ -35,7 +35,8 @@ local DefaultConfig = {
     WebhookPlayer = false,
     WebhookJoinLeave = false,
     UISizeX = 520,
-    UISizeY = 320
+    UISizeY = 320,
+    AutoTeleportSpawn = false -- [UPDATE]: Added new config for Auto Teleport
 }
 
 local ConfigData = {}
@@ -998,45 +999,73 @@ local BtnRefreshPlayer = CreateButton(DropPlayerTP, "Refresh Player List", LoadP
 LoadPlayers() 
 
 -- ========================================================
--- FEATURE BARU: SAVED LOCATION TELEPORT
+-- [UPDATE] FEATURE BARU: SAVED LOCATION TELEPORT 
 -- ========================================================
 local DropSavedTP = CreateDropdown(TabTeleport, "📌 Custom Saved Location")
 local savedCustomLocation = nil
 
-local SavedLocOptions = {
-    "Save Current Location",
-    "Teleport to Saved",
-    "Reset Saved Location"
-}
-
-local SavedLocFrame, SavedLocPopulate, SavedLocSelectBtn = CreateSelector(DropSavedTP, "Select Action", SavedLocOptions, function(sel)
+local BtnSaveLoc
+BtnSaveLoc = CreateButton(DropSavedTP, "Save Current Location", function()
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    if sel == "Save Current Location" then
-        if hrp then
-            savedCustomLocation = hrp.CFrame
-            SavedLocSelectBtn.Text = "Location Saved!"
-            SavedLocSelectBtn.TextColor3 = Color3.fromRGB(50, 255, 100)
-        end
-    elseif sel == "Teleport to Saved" then
-        if savedCustomLocation and hrp then
-            hrp.CFrame = savedCustomLocation
-            hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
-            SavedLocSelectBtn.Text = "Teleported!"
-            SavedLocSelectBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
-        else
-            SavedLocSelectBtn.Text = "No Save Found!"
-            SavedLocSelectBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
-        end
-    elseif sel == "Reset Saved Location" then
-        savedCustomLocation = nil
-        SavedLocSelectBtn.Text = "Location Reset!"
-        SavedLocSelectBtn.TextColor3 = Color3.fromRGB(255, 200, 50)
+    if hrp then
+        savedCustomLocation = hrp.CFrame
+        BtnSaveLoc.Text = "Location Saved!"
+        BtnSaveLoc.TextColor3 = Color3.fromRGB(50, 255, 100)
+    else
+        BtnSaveLoc.Text = "Player Not Found!"
+        BtnSaveLoc.TextColor3 = Color3.fromRGB(255, 100, 100)
     end
-    
     task.delay(2, function()
-        SavedLocSelectBtn.Text = "Select Action"
-        SavedLocSelectBtn.TextColor3 = c_subtext
+        BtnSaveLoc.Text = "Save Current Location"
+        BtnSaveLoc.TextColor3 = c_text
     end)
+end)
+
+local BtnTeleportLoc
+BtnTeleportLoc = CreateButton(DropSavedTP, "Teleport to Saved", function()
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if savedCustomLocation and hrp then
+        hrp.CFrame = savedCustomLocation
+        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+        BtnTeleportLoc.Text = "Teleported!"
+        BtnTeleportLoc.TextColor3 = Color3.fromRGB(100, 200, 255)
+    else
+        BtnTeleportLoc.Text = "No Save Found!"
+        BtnTeleportLoc.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+    task.delay(2, function()
+        BtnTeleportLoc.Text = "Teleport to Saved"
+        BtnTeleportLoc.TextColor3 = c_text
+    end)
+end)
+
+local BtnResetLoc
+BtnResetLoc = CreateButton(DropSavedTP, "Reset Saved Location", function()
+    savedCustomLocation = nil
+    BtnResetLoc.Text = "Location Reset!"
+    BtnResetLoc.TextColor3 = Color3.fromRGB(255, 200, 50)
+    task.delay(2, function()
+        BtnResetLoc.Text = "Reset Saved Location"
+        BtnResetLoc.TextColor3 = c_text
+    end)
+end)
+
+CreateToggle(DropSavedTP, "Auto Teleport on Spawn", "AutoTeleportSpawn", function(state)
+    -- State sudah dihandle oleh SaveConfig dan listener dibawah
+end)
+
+-- Listener Event Auto Teleport On Spawn (Jika Toggle Nyala)
+player.CharacterAdded:Connect(function(char)
+    if ConfigData.AutoTeleportSpawn and savedCustomLocation then
+        task.spawn(function()
+            local hrp = char:WaitForChild("HumanoidRootPart", 5)
+            if hrp then
+                task.wait(0.5) -- Sedikit jeda agar logic map teleport in-game selesai
+                hrp.CFrame = savedCustomLocation
+                hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+            end
+        end)
+    end
 end)
 
 -- ========================================================
