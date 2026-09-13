@@ -788,7 +788,7 @@ CreateToggle(DropElemental, "Enable Auto TP Cuaca", "AutoTP", function(state)
     end
 end)
 
--- [UPDATE BARU]: MENU SELECTOR MANUAL TP CUACA (AMBIL DARI SCRIPT 2)
+-- MENU SELECTOR MANUAL TP CUACA
 local elementalMapNames = {"Volcano (Gunung Berapi)", "Blizzard (Es / Ice Storm)", "Storm (Badai)"}
 local elementalKeyMap = {
     ["Volcano (Gunung Berapi)"] = "Volcano",
@@ -858,7 +858,7 @@ if not ConfigData.AutoFishingToggle then
     UIStatus_Fishing.TextColor3 = c_subtext
 end
 
--- ====== BOOSTER & RAM (INDIVIDUAL TOGGLES IN LIST) ======
+-- ====== BOOSTER & RAM ======
 local DropBooster = CreateDropdown(TabBooster, "🚀 Graphic & Performance Booster")
 local UIStatus_Booster = CreateStatusLabel(DropBooster)
 UIStatus_Booster.Text = "BOOSTER STATUS: ACTIVE"
@@ -909,7 +909,7 @@ CreateToggle(DropBooster, "Auto Clean RAM", "AutoRAM", function(state)
     end
 end)
 
--- ====== DISCORD WEBHOOKS (INDIVIDUAL TOGGLES IN LIST) ======
+-- ====== DISCORD WEBHOOKS ======
 local DropGlobalWeb = CreateDropdown(TabWebhooks, "🔗 Global Webhook Configuration")
 CreateTextBox(DropGlobalWeb, "Paste Webhook URL Discord Di Sini...", "WebhookURL", function(txt) end)
 
@@ -1150,7 +1150,12 @@ task.spawn(function()
 
             if schedule.state == "COOLDOWN" then
                 isWeatherTPBusy = false -- Priority OFF
-                PulangKeSetPos()
+                
+                -- Hanya kembali ke posisi simpanan jika Auto Fishing TIDAK aktif
+                if not ConfigData.AutoFishingToggle then
+                    PulangKeSetPos()
+                end
+
                 while ConfigData.AutoTP do
                     local realTimeSchedule = GetEventScheduleWIB()
                     if realTimeSchedule.state == "ACTIVE" then break end 
@@ -1200,7 +1205,7 @@ task.spawn(function()
                 local targetAngle = math.rad(poolAngles[currentPoolIndex])
                 local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
                 
-                -- Hanya teleport ke spot mancing jika Auto TP Cuaca TIDAK sedang beraksi
+                -- Set posisi awal jika cuaca tidak busy
                 if not isWeatherTPBusy then
                     for i = 1, 6 do
                         if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
@@ -1211,7 +1216,20 @@ task.spawn(function()
                 currentPoolIndex = currentPoolIndex + 1; if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
                 
                 local elapsed = 0
+                local wasBusy = isWeatherTPBusy
+                
                 while elapsed < rotateInterval and ConfigData.AutoRotate and not ConfigData.AutoDualMap do
+                    if isWeatherTPBusy then
+                        wasBusy = true -- Menandakan sedang ditimpa event cuaca
+                    elseif wasBusy then
+                        wasBusy = false -- Event cuaca selesai, langsung resume ke target spot
+                        if hrp and hrp.Parent then
+                            hrp.CFrame = targetCFrame
+                            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                            hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                        end
+                    end
+
                     local sisaDetik = rotateInterval - elapsed
                     if UIStatus_Fishing then
                         if isWeatherTPBusy then
@@ -1222,7 +1240,7 @@ task.spawn(function()
                             UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
                         end
                     end
-                    task.wait(1); elapsed = elapsed + 1
+                    task.wait(1); elapsed = elapsed + 1 -- Timer tetap berjalan di background
                 end
             else
                 task.wait(1)
@@ -1271,21 +1289,30 @@ task.spawn(function()
                 local map1Timer = 0
                 while map1Timer < dualMapInterval and ConfigData.AutoDualMap do
                     hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                    local targetAngle = math.rad(poolAngles[currentPoolIndex])
+                    local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
+
                     if hrp and not isWeatherTPBusy then
-                        local targetAngle = math.rad(poolAngles[currentPoolIndex])
-                        local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
-                        
                         for i = 1, 4 do
                             if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
                             task.wait(0.05)
                         end
-                        
-                        currentPoolIndex = currentPoolIndex + 1
-                        if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
                     end
+                    
+                    currentPoolIndex = currentPoolIndex + 1
+                    if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
 
                     local subTimer = 0
+                    local wasBusy = isWeatherTPBusy
+                    
                     while subTimer < rotateInterval and map1Timer < dualMapInterval and ConfigData.AutoDualMap do
+                        if isWeatherTPBusy then
+                            wasBusy = true
+                        elseif wasBusy then
+                            wasBusy = false -- Resume posisi setelah event cuaca
+                            if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
+                        end
+
                         local sisaPindah = dualMapInterval - map1Timer
                         if UIStatus_Fishing then
                             if isWeatherTPBusy then
@@ -1297,7 +1324,7 @@ task.spawn(function()
                             end
                         end
                         task.wait(1)
-                        subTimer = subTimer + 1
+                        subTimer = subTimer + 1 -- Timer jalan terus
                         map1Timer = map1Timer + 1
                     end
                 end
@@ -1333,7 +1360,7 @@ task.spawn(function()
                         end
                     end
                     task.wait(1)
-                    map2Timer = map2Timer + 1
+                    map2Timer = map2Timer + 1 -- Timer jalan terus
                 end
             end
         else
