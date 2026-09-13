@@ -36,7 +36,7 @@ local DefaultConfig = {
     WebhookJoinLeave = false,
     UISizeX = 520,
     UISizeY = 320,
-    AutoTeleportSpawn = false -- [UPDATE]: Added new config for Auto Teleport
+    AutoTeleportSpawn = false
 }
 
 local ConfigData = {}
@@ -78,6 +78,9 @@ local spotKordinat = {
 }
 local DatabaseIconCuaca = {["118379404229807"] = "Blizzard", ["105076841543450"] = "Storm", ["76632496002371"] = "Volcano"}
 local posisiSimpanan = nil
+
+-- State Priority Lock
+local isWeatherTPBusy = false
 
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
@@ -780,9 +783,39 @@ CreateToggle(DropElemental, "Enable Auto TP Cuaca", "AutoTP", function(state)
     if state then
         if hrp and not posisiSimpanan then posisiSimpanan = hrp.CFrame end
     else
+        isWeatherTPBusy = false
         UIStatus_Elemental.Text = "SYSTEM PAUSED"; UIStatus_Elemental.TextColor3 = c_subtext
     end
 end)
+
+-- [UPDATE BARU]: MENU SELECTOR MANUAL TP CUACA (AMBIL DARI SCRIPT 2)
+local elementalMapNames = {"Volcano (Gunung Berapi)", "Blizzard (Es / Ice Storm)", "Storm (Badai)"}
+local elementalKeyMap = {
+    ["Volcano (Gunung Berapi)"] = "Volcano",
+    ["Blizzard (Es / Ice Storm)"] = "Blizzard",
+    ["Storm (Badai)"] = "Storm"
+}
+local selectedElementalMapKey = nil
+
+local ElemFrame, ElemPopulate, ElemSelectBtn = CreateSelector(DropElemental, "Manual Weather TP", elementalMapNames, function(selText)
+    selectedElementalMapKey = elementalKeyMap[selText]
+end)
+
+local BtnTPElementalManual = CreateButton(DropElemental, "Teleport Manual to Weather Map", function()
+    if not selectedElementalMapKey then return end
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if hrp and spotKordinat[selectedElementalMapKey] then
+        local targetCF = spotKordinat[selectedElementalMapKey]
+        hrp.CFrame = CFrame.new(targetCF.Position + Vector3.new(0, 3, 0)) * targetCF.Rotation
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end
+end)
+BtnTPElementalManual.BackgroundColor3 = c_sidebar
+BtnTPElementalManual.TextColor3 = c_accent
+BtnTPElementalManual.Font = Enum.Font.GothamBold
+local UIStrokeElemManual = Instance.new("UIStroke", BtnTPElementalManual)
+UIStrokeElemManual.Color = c_accent
+UIStrokeElemManual.Thickness = 1
 
 -- ====== AUTOMATION: AUTO FISHING MANAGER ======
 local DropFishing = CreateDropdown(TabAutomation, "🎣 Auto Fishing Manager")
@@ -999,7 +1032,7 @@ local BtnRefreshPlayer = CreateButton(DropPlayerTP, "Refresh Player List", LoadP
 LoadPlayers() 
 
 -- ========================================================
--- [UPDATE] FEATURE BARU: SAVED LOCATION TELEPORT 
+-- SAVED LOCATION TELEPORT
 -- ========================================================
 local DropSavedTP = CreateDropdown(TabTeleport, "📌 Custom Saved Location")
 local savedCustomLocation = nil
@@ -1050,17 +1083,14 @@ BtnResetLoc = CreateButton(DropSavedTP, "Reset Saved Location", function()
     end)
 end)
 
-CreateToggle(DropSavedTP, "Auto Teleport on Spawn", "AutoTeleportSpawn", function(state)
-    -- State sudah dihandle oleh SaveConfig dan listener dibawah
-end)
+CreateToggle(DropSavedTP, "Auto Teleport on Spawn", "AutoTeleportSpawn", function(state) end)
 
--- Listener Event Auto Teleport On Spawn (Jika Toggle Nyala)
 player.CharacterAdded:Connect(function(char)
     if ConfigData.AutoTeleportSpawn and savedCustomLocation then
         task.spawn(function()
             local hrp = char:WaitForChild("HumanoidRootPart", 5)
             if hrp then
-                task.wait(0.5) -- Sedikit jeda agar logic map teleport in-game selesai
+                task.wait(0.5)
                 hrp.CFrame = savedCustomLocation
                 hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
             end
@@ -1106,15 +1136,20 @@ player.Idled:Connect(function() if ConfigData.AntiAFK then VirtualUser:CaptureCo
 
 task.spawn(function() while true do task.wait(60); if ConfigData.AutoRAM then collectgarbage("collect") end end end)
 
+-- ====== [THREAD 1]: AUTO TP CUACA (HIGH PRIORITY HANDLER) ======
 task.spawn(function()
     while true do
         task.wait(1)
         if ConfigData.AutoTP then
             local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-            if not hrp then continue end
+            if not hrp then 
+                isWeatherTPBusy = false
+                continue 
+            end
             local schedule = GetEventScheduleWIB()
 
             if schedule.state == "COOLDOWN" then
+                isWeatherTPBusy = false -- Priority OFF
                 PulangKeSetPos()
                 while ConfigData.AutoTP do
                     local realTimeSchedule = GetEventScheduleWIB()
@@ -1131,6 +1166,7 @@ task.spawn(function()
                 local cuacaAktif = GetWeatherIconOnly()
                 if cuacaAktif then
                     local targetCFrame = spotKordinat[cuacaAktif]
+                    isWeatherTPBusy = true -- Lock Priority ON!
                     while ConfigData.AutoTP do
                         local realTimeSchedule = GetEventScheduleWIB()
                         if realTimeSchedule.state == "COOLDOWN" then break end 
@@ -1143,14 +1179,19 @@ task.spawn(function()
                         end
                         task.wait(1)
                     end
+                    isWeatherTPBusy = false -- Priority Release
                 else
+                    isWeatherTPBusy = false
                     UIStatus_Elemental.Text = "MENUNGGU ICON CUACA..."; UIStatus_Elemental.TextColor3 = c_subtext; task.wait(1)
                 end
             end
+        else
+            isWeatherTPBusy = false
         end
     end
 end)
 
+-- ====== [THREAD 2]: AUTO ROTATE MAP 1 (PRIORITY COMPATIBLE) ======
 task.spawn(function()
     while true do
         if ConfigData.AutoRotate and not ConfigData.AutoDualMap then
@@ -1159,9 +1200,12 @@ task.spawn(function()
                 local targetAngle = math.rad(poolAngles[currentPoolIndex])
                 local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
                 
-                for i = 1, 6 do
-                    if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
-                    task.wait(0.05)
+                -- Hanya teleport ke spot mancing jika Auto TP Cuaca TIDAK sedang beraksi
+                if not isWeatherTPBusy then
+                    for i = 1, 6 do
+                        if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
+                        task.wait(0.05)
+                    end
                 end
                 
                 currentPoolIndex = currentPoolIndex + 1; if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
@@ -1170,8 +1214,13 @@ task.spawn(function()
                 while elapsed < rotateInterval and ConfigData.AutoRotate and not ConfigData.AutoDualMap do
                     local sisaDetik = rotateInterval - elapsed
                     if UIStatus_Fishing then
-                        UIStatus_Fishing.Text = "MAP 1 ROTATE: " .. formatSecondsToText(sisaDetik)
-                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
+                        if isWeatherTPBusy then
+                            UIStatus_Fishing.Text = "MAP 1 ROTATE: PAUSED (AUTO TP CUACA PRIORITY)"
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        else
+                            UIStatus_Fishing.Text = "MAP 1 ROTATE: " .. formatSecondsToText(sisaDetik)
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
+                        end
                     end
                     task.wait(1); elapsed = elapsed + 1
                 end
@@ -1184,19 +1233,25 @@ task.spawn(function()
     end
 end)
 
+-- ====== [THREAD 3]: AUTO MAP 2 CANYON (PRIORITY COMPATIBLE) ======
 task.spawn(function()
     while true do
         if ConfigData.AutoMap2 and not ConfigData.AutoDualMap then
             local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
-                if (hrp.Position - map2Pos).Magnitude > 5 then
+                if not isWeatherTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then
                     hrp.CFrame = map2CFrame
                     hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
                     hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
                 end
                 if UIStatus_Fishing then
-                    UIStatus_Fishing.Text = "MAP 2 ACTIVE (STAY STAYING)"
-                    UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    if isWeatherTPBusy then
+                        UIStatus_Fishing.Text = "MAP 2 ACTIVE: PAUSED (AUTO TP CUACA PRIORITY)"
+                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                    else
+                        UIStatus_Fishing.Text = "MAP 2 ACTIVE (STAY STAYING)"
+                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    end
                 end
             end
             task.wait(1)
@@ -1206,6 +1261,7 @@ task.spawn(function()
     end
 end)
 
+-- ====== [THREAD 4]: AUTO DUAL MAP SWITCH (PRIORITY COMPATIBLE) ======
 task.spawn(function()
     while true do
         if ConfigData.AutoDualMap then
@@ -1215,7 +1271,7 @@ task.spawn(function()
                 local map1Timer = 0
                 while map1Timer < dualMapInterval and ConfigData.AutoDualMap do
                     hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
+                    if hrp and not isWeatherTPBusy then
                         local targetAngle = math.rad(poolAngles[currentPoolIndex])
                         local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
                         
@@ -1232,8 +1288,13 @@ task.spawn(function()
                     while subTimer < rotateInterval and map1Timer < dualMapInterval and ConfigData.AutoDualMap do
                         local sisaPindah = dualMapInterval - map1Timer
                         if UIStatus_Fishing then
-                            UIStatus_Fishing.Text = "MAP 1 (ROTATING) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(100, 200, 255)
+                            if isWeatherTPBusy then
+                                UIStatus_Fishing.Text = "MAP 1 (ROTATING): PAUSED (AUTO TP CUACA PRIORITY)"
+                                UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                            else
+                                UIStatus_Fishing.Text = "MAP 1 (ROTATING) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
+                                UIStatus_Fishing.TextColor3 = Color3.fromRGB(100, 200, 255)
+                            end
                         end
                         task.wait(1)
                         subTimer = subTimer + 1
@@ -1245,7 +1306,7 @@ task.spawn(function()
             if ConfigData.AutoDualMap then
                 local map2Timer = 0
                 hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then
+                if hrp and not isWeatherTPBusy then
                     for i = 1, 6 do
                         hrp.CFrame = map2CFrame
                         hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
@@ -1256,15 +1317,20 @@ task.spawn(function()
 
                 while map2Timer < dualMapInterval and ConfigData.AutoDualMap do
                     hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp and (hrp.Position - map2Pos).Magnitude > 5 then
+                    if hrp and not isWeatherTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then
                         hrp.CFrame = map2CFrame
                         hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
                     end
 
                     local sisaPindah = dualMapInterval - map2Timer
                     if UIStatus_Fishing then
-                        UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
-                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        if isWeatherTPBusy then
+                            UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF): PAUSED (AUTO TP CUACA PRIORITY)"
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        else
+                            UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        end
                     end
                     task.wait(1)
                     map2Timer = map2Timer + 1
