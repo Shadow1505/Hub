@@ -45,14 +45,21 @@ local DefaultConfig = {
     AutoReconnect = false,
     Freecam = false,
     UnlimitedZoom = true,
+    
+    SprintToggle = false,
     SprintSpeed = 16,
+    FlyMode = false,
     FlySpeed = 50,
     InfiniteJump = false,
-    FlyMode = false,
     NoClip = false,
     Invisible = false,
     LavaImmunity = false,
+    
     HideStats = false,
+    CustomName = "HiddenShadow",
+    CustomLevel = "999",
+    RobloxPlusBadge = false,
+    
     SelectedTheme = "Default"
 }
 
@@ -614,7 +621,7 @@ local function CreateTab(name, active)
             pData.Button.BackgroundColor3 = isTarget and Color3.fromRGB(35, 35, 45) or c_sidebar
             pData.Button:SetAttribute("ThemeRole", isTarget and "content" or "sidebar")
             pData.Button.TextColor3 = isTarget and c_text or c_subtext
-            ApplyTheme() -- Segarkan warna btn jika sedang aktif
+            ApplyTheme()
         end
     end)
     return PageScroll
@@ -788,7 +795,7 @@ local function CreateInfoLabel(parent, text)
 end
 
 -- ========================================================
--- 6. MENU SETUP (OLD)
+-- 6. MENU SETUP (AUTOMATION, BOOSTER, WEBHOOKS, TELEPORT)
 -- ========================================================
 local DropElemental = CreateDropdown(TabAutomation, "Event Elemental TP")
 local UIStatus_Elemental = CreateStatusLabel(DropElemental)
@@ -939,7 +946,7 @@ BtnReset.MouseButton1Click:Connect(function()
 end)
 
 -- ==========================================================
--- [ NEW ] 6.5. PLAYER & SERVER MODS (UPDATE THREAD)
+-- 6.5. PLAYER & SERVER MODS (UPDATED UI LAYOUT)
 -- ==========================================================
 local DropSafety = CreateDropdown(TabPlayerMods, "🛡️ Server & Safety Mods")
 CreateToggle(DropSafety, "Staff Detector & Auto Hop", "StaffDetector", function(state) end)
@@ -964,27 +971,49 @@ end)
 local DropCamera = CreateDropdown(TabPlayerMods, "🎥 Camera System")
 CreateInfoLabel(DropCamera, "Info PC: Tekan F3 untuk on/off. Gerak [WASD], Naik [E/Space], Turun [Q/Shift].")
 CreateInfoLabel(DropCamera, "Info Mobile: Gunakan Joystick layar untuk gerak, usap layar untuk putar kamera.")
+
 CreateToggle(DropCamera, "Enable Freecam", "Freecam", function(state)
     local cam = workspace.CurrentCamera
     if state then
-        if not workspace:FindFirstChild("ShadowFreecamPart") then
-            local fc = Instance.new("Part", workspace); fc.Name = "ShadowFreecamPart"; fc.Anchored = true; fc.CanCollide = false; fc.Transparency = 1; fc.Size = Vector3.new(1,1,1)
-            local char = player.Character; if char and char:FindFirstChild("Head") then fc.CFrame = char.Head.CFrame end
+        if not workspace:FindFirstChild("ShadowFreecamDummy") then
+            local dummy = Instance.new("Model", workspace)
+            dummy.Name = "ShadowFreecamDummy"
+            local fc = Instance.new("Part", dummy)
+            fc.Name = "HumanoidRootPart"
+            fc.Anchored = true; fc.CanCollide = false; fc.Transparency = 1; fc.Size = Vector3.new(1,1,1)
+            local hum = Instance.new("Humanoid", dummy)
+            local char = player.Character
+            if char and char:FindFirstChild("Head") then fc.CFrame = char.Head.CFrame end
+            dummy.PrimaryPart = fc
         end
-        cam.CameraSubject = workspace:FindFirstChild("ShadowFreecamPart")
+        cam.CameraSubject = workspace:FindFirstChild("ShadowFreecamDummy"):FindFirstChild("Humanoid")
     else
         local char = player.Character; if char and char:FindFirstChild("Humanoid") then cam.CameraSubject = char.Humanoid end
-        local fc = workspace:FindFirstChild("ShadowFreecamPart"); if fc then fc:Destroy() end
+        local dummy = workspace:FindFirstChild("ShadowFreecamDummy"); if dummy then dummy:Destroy() end
     end
 end)
+
 CreateToggle(DropCamera, "Unlimited Zoom", "UnlimitedZoom", function(state)
     player.CameraMaxZoomDistance = state and math.huge or 128
 end)
 
 local DropPlayer = CreateDropdown(TabPlayerMods, "🦸 Player Feature")
+
+-- 1. SPRINT FEATURE
+CreateToggle(DropPlayer, "Enable Custom Sprint", "SprintToggle", function(state) end)
 CreateTextBox(DropPlayer, "Walk Speed (Default: 16)", "SprintSpeed", function(txt) end)
-CreateTextBox(DropPlayer, "Fly Speed (Default: 50)", "FlySpeed", function(txt) end)
+
+-- 2. FLY MODE FEATURE
 CreateToggle(DropPlayer, "Enable Fly Mode", "FlyMode", function(state) end)
+CreateTextBox(DropPlayer, "Fly Speed (Default: 50)", "FlySpeed", function(txt) end)
+
+-- 3. HIDE STATS & ROBLOX PLUS BADGE
+CreateToggle(DropPlayer, "Hide Stats (Fake Name/Lv)", "HideStats", function(state) end)
+CreateTextBox(DropPlayer, "Custom Fake Name", "CustomName", function(txt) end)
+CreateTextBox(DropPlayer, "Custom Fake Level", "CustomLevel", function(txt) end)
+CreateToggle(DropPlayer, "Roblox Plus Verification Logo", "RobloxPlusBadge", function(state) end)
+
+-- 4. OTHER PLAYER MODS
 CreateToggle(DropPlayer, "Infinite Jump", "InfiniteJump", function(state) end)
 CreateToggle(DropPlayer, "No Clip (Tembus Objek)", "NoClip", function(state) end)
 CreateToggle(DropPlayer, "Lava Kill Immunity", "LavaImmunity", function(state) end)
@@ -995,7 +1024,6 @@ CreateToggle(DropPlayer, "Hide Character (Invisible)", "Invisible", function(sta
         elseif v:IsA("Decal") then v.Transparency = state and 1 or 0 end
     end
 end)
-CreateToggle(DropPlayer, "Hide Stats (Fake Name/Lv)", "HideStats", function(state) end)
 
 local DropTheme = CreateDropdown(TabPlayerMods, "🎨 Tema UI Panel")
 CreateSelector(DropTheme, "Pilih Tema", {"Default", "Elegant Gold"}, function(sel)
@@ -1003,9 +1031,8 @@ CreateSelector(DropTheme, "Pilih Tema", {"Default", "Elegant Gold"}, function(se
 end)
 
 -- ==========================================================
--- 7. BACKGROUND ENGINES & THREADS
+-- 7. BACKGROUND ENGINES & THREADS (PERBAIKAN BUG)
 -- ==========================================================
--- Apply Theme saat pertama kali run
 ApplyTheme()
 player.CameraMaxZoomDistance = ConfigData.UnlimitedZoom and math.huge or 128
 
@@ -1024,7 +1051,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
     end
 end)
 
--- Mods Loop
+-- Mods Loop (Stepped)
 RunService.Stepped:Connect(function()
     local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -1034,10 +1061,14 @@ RunService.Stepped:Connect(function()
         for _, v in pairs(char:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide = false end end
     end
     
-    -- Walk Speed
-    if hum then pcall(function() hum.WalkSpeed = tonumber(ConfigData.SprintSpeed) or 16 end) end
+    -- Walk Speed (Sprint)
+    if hum then 
+        pcall(function() 
+            hum.WalkSpeed = ConfigData.SprintToggle and (tonumber(ConfigData.SprintSpeed) or 16) or 16 
+        end) 
+    end
     
-    -- Fly Mode
+    -- Fly Mode (Fix Bug: Memakai BodyVelocity & BodyGyro agar tidak nyangkut)
     if ConfigData.FlyMode and hrp and hum then
         local cam = workspace.CurrentCamera
         local ctrl = {f = 0, b = 0, l = 0, r = 0}
@@ -1048,19 +1079,24 @@ RunService.Stepped:Connect(function()
         
         local flySpeed = tonumber(ConfigData.FlySpeed) or 50
         hum.PlatformStand = true
-        hrp.Velocity = (cam.CFrame.LookVector * (ctrl.f + ctrl.b) + cam.CFrame.RightVector * (ctrl.l + ctrl.r)) * flySpeed
+        
+        local bv = hrp:FindFirstChild("ShadowFlyVelocity") or Instance.new("BodyVelocity", hrp)
+        bv.Name = "ShadowFlyVelocity"; bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        bv.Velocity = (cam.CFrame.LookVector * (ctrl.f + ctrl.b) + cam.CFrame.RightVector * (ctrl.l + ctrl.r)) * flySpeed
         
         local bg = hrp:FindFirstChild("ShadowFlyGyro") or Instance.new("BodyGyro", hrp)
         bg.Name = "ShadowFlyGyro"; bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9); bg.CFrame = cam.CFrame
     elseif hum and hum.PlatformStand then
         hum.PlatformStand = false
+        if hrp:FindFirstChild("ShadowFlyVelocity") then hrp.ShadowFlyVelocity:Destroy() end
         if hrp:FindFirstChild("ShadowFlyGyro") then hrp.ShadowFlyGyro:Destroy() end
     end
 
-    -- Freecam Movement Logic
+    -- Freecam Movement Logic (Fix Bug: Memakai Dummy Model agar arah kamera tetap bisa dirotasi)
     if ConfigData.Freecam then
-        local fc = workspace:FindFirstChild("ShadowFreecamPart")
-        if fc then
+        local dummy = workspace:FindFirstChild("ShadowFreecamDummy")
+        if dummy and dummy.PrimaryPart then
+            local fc = dummy.PrimaryPart
             local cam = workspace.CurrentCamera
             local spd = 2; local mov = Vector3.new()
             if UserInputService:IsKeyDown(Enum.KeyCode.W) then mov = mov + cam.CFrame.LookVector end
@@ -1074,7 +1110,7 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Lava Immunity & Hide Stats
+-- Lava Immunity, Hide Stats & Roblox Plus Loop
 task.spawn(function()
     while true do
         task.wait(1)
@@ -1085,16 +1121,27 @@ task.spawn(function()
                 end
             end
         end
-        if ConfigData.HideStats and player.Character then
+        if (ConfigData.HideStats or ConfigData.RobloxPlusBadge) and player.Character then
             local head = player.Character:FindFirstChild("Head")
             if head then
                 for _, gui in pairs(head:GetChildren()) do
                     if gui:IsA("BillboardGui") then
                         for _, text in pairs(gui:GetDescendants()) do
-                            if text:IsA("TextLabel") then
-                                if string.find(text.Text, player.Name) or string.find(text.Text, player.DisplayName) then text.Text = "HiddenShadow" end
-                                if string.find(string.lower(text.Text), "lv") then text.Text = "Lv. 999" end
-                            elseif text:IsA("ImageLabel") then text.Visible = false end
+                            if text:IsA("TextLabel") and ConfigData.HideStats then
+                                if string.find(text.Text, player.Name) or string.find(text.Text, player.DisplayName) then 
+                                    text.Text = ConfigData.CustomName ~= "" and ConfigData.CustomName or "HiddenShadow" 
+                                end
+                                if string.find(string.lower(text.Text), "lv") then 
+                                    text.Text = "Lv. " .. (ConfigData.CustomLevel ~= "" and ConfigData.CustomLevel or "999") 
+                                end
+                            elseif text:IsA("ImageLabel") then 
+                                if ConfigData.RobloxPlusBadge then
+                                    text.Visible = true
+                                    text.Image = "rbxassetid://10250085440"
+                                else
+                                    text.Visible = false 
+                                end
+                            end
                         end
                     end
                 end
@@ -1131,7 +1178,7 @@ CoreGui:FindFirstChild("RobloxPromptGui").promptOverlay.ChildAdded:Connect(funct
 end)
 
 -- ==========================================================
--- ORIGINAL AUTOMATION THREADS (TIDAK DISENTUH)
+-- ORIGINAL AUTOMATION THREADS (UTUH TANPA PERUBAHAN LOGIKA)
 -- ==========================================================
 task.spawn(function()
     while true do
