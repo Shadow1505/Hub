@@ -40,6 +40,12 @@ local DefaultConfig = {
     UISizeY = 320,
     AutoTeleportSpawn = false,
     
+    -- NEW DUAL MAP CONFIGS (STATE SAVING)
+    DualMapCurrentState = "Map 2",
+    DualMapTimer = 0,
+    DualMapSubTimer = 0,
+    DualMapPoolIndex = 1,
+    
     -- NEW CONFIGS
     StaffDetector = false,
     AutoReconnect = false,
@@ -839,6 +845,20 @@ end)
 local UIStatus_Fishing = CreateStatusLabel(DropFishing)
 if not ConfigData.AutoFishingToggle then UIStatus_Fishing.Text = "AUTO FISHING: OFF"; UIStatus_Fishing.TextColor3 = c_subtext end
 
+local BtnResetDualMap = CreateButton(DropFishing, "🔄 Reset Dual Map State", function()
+    ConfigData.DualMapCurrentState = "Map 2"
+    ConfigData.DualMapTimer = 0
+    ConfigData.DualMapSubTimer = 0
+    ConfigData.DualMapPoolIndex = 1
+    SaveConfig()
+    BtnResetDualMap.Text = "✅ Dual Map State Reset!"
+    BtnResetDualMap.TextColor3 = Color3.fromRGB(100, 255, 100)
+    task.delay(1.5, function() 
+        BtnResetDualMap.Text = "🔄 Reset Dual Map State" 
+        BtnResetDualMap.TextColor3 = c_text
+    end)
+end)
+
 local DropBooster = CreateDropdown(TabBooster, "🚀 Graphic & Performance Booster")
 local UIStatus_Booster = CreateStatusLabel(DropBooster); UIStatus_Booster.Text = "BOOSTER STATUS: ACTIVE"; UIStatus_Booster.TextColor3 = Color3.fromRGB(50, 255, 100)
 CreateToggle(DropBooster, "FPS Booster (Nuke Visuals)", "FPSBooster", function(state) if UIStatus_Booster then UIStatus_Booster.Text = "FPS BOOSTER: " .. (state and "ON" or "OFF"); UIStatus_Booster.TextColor3 = state and Color3.fromRGB(50, 255, 100) or c_subtext end end)
@@ -1178,7 +1198,7 @@ CoreGui:FindFirstChild("RobloxPromptGui").promptOverlay.ChildAdded:Connect(funct
 end)
 
 -- ==========================================================
--- ORIGINAL AUTOMATION THREADS (UTUH TANPA PERUBAHAN LOGIKA)
+-- ORIGINAL AUTOMATION THREADS
 -- ==========================================================
 task.spawn(function()
     while true do
@@ -1308,59 +1328,132 @@ task.spawn(function()
     end
 end)
 
--- ====== [THREAD 4]: AUTO DUAL MAP SWITCH ======
+-- ====== [THREAD 4]: AUTO DUAL MAP SWITCH (UPDATED ANTI-DC & RESUME) ======
 task.spawn(function()
+    local saveCounter = 0
     while true do
         if ConfigData.AutoDualMap then
             local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if ConfigData.AutoDualMap then
-                local map1Timer = 0
-                while map1Timer < dualMapInterval and ConfigData.AutoDualMap do
-                    hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    local targetAngle = math.rad(poolAngles[currentPoolIndex])
-                    local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
-
-                    if hrp and not isWeatherTPBusy then
-                        for i = 1, 4 do if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end; task.wait(0.05) end
-                    end
-                    currentPoolIndex = currentPoolIndex + 1
-                    if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
-
-                    local subTimer = 0; local wasBusy = isWeatherTPBusy
-                    
-                    while subTimer < rotateInterval and map1Timer < dualMapInterval and ConfigData.AutoDualMap do
-                        if isWeatherTPBusy then wasBusy = true
-                        elseif wasBusy then wasBusy = false; if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end end
-
-                        local sisaPindah = dualMapInterval - map1Timer
-                        if UIStatus_Fishing then
-                            if isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 1 (ROTATING): PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                            else UIStatus_Fishing.Text = "MAP 1 (ROTATING) | SWITCH IN: " .. formatSecondsToText(sisaPindah); UIStatus_Fishing.TextColor3 = Color3.fromRGB(100, 200, 255) end
+            
+            if ConfigData.DualMapCurrentState == "Map 2" then
+                -- Initial teleport saat pertama kali ke Map 2
+                if ConfigData.DualMapTimer == 0 and hrp and not isWeatherTPBusy then
+                    for i = 1, 6 do 
+                        if hrp and hrp.Parent then
+                            hrp.CFrame = map2CFrame
+                            hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
+                            hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
                         end
-                        task.wait(1); subTimer = subTimer + 1; map1Timer = map1Timer + 1
+                        task.wait(0.05) 
                     end
                 end
-            end
 
-            if ConfigData.AutoDualMap then
-                local map2Timer = 0
-                hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and not isWeatherTPBusy then
-                    for i = 1, 6 do hrp.CFrame = map2CFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0); hrp.AssemblyAngularVelocity = Vector3.new(0,0,0); task.wait(0.05) end
-                end
-
-                while map2Timer < dualMapInterval and ConfigData.AutoDualMap do
+                while ConfigData.DualMapTimer < dualMapInterval and ConfigData.AutoDualMap and ConfigData.DualMapCurrentState == "Map 2" do
                     hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp and not isWeatherTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then hrp.CFrame = map2CFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) end
-
-                    local sisaPindah = dualMapInterval - map2Timer
-                    if UIStatus_Fishing then
-                        if isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF): PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        else UIStatus_Fishing.Text = "MAP 2 (ROTATE OFF) | SWITCH IN: " .. formatSecondsToText(sisaPindah); UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50) end
+                    if hrp and not isWeatherTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then 
+                        hrp.CFrame = map2CFrame
+                        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) 
                     end
-                    task.wait(1); map2Timer = map2Timer + 1
+
+                    local sisaPindah = dualMapInterval - ConfigData.DualMapTimer
+                    if UIStatus_Fishing then
+                        if isWeatherTPBusy then 
+                            UIStatus_Fishing.Text = "MAP 2 (CANYON): PAUSED (AUTO TP CUACA)"
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        else 
+                            UIStatus_Fishing.Text = "MAP 2 (CANYON) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50) 
+                        end
+                    end
+                    
+                    task.wait(1)
+                    if not isWeatherTPBusy then
+                        ConfigData.DualMapTimer = ConfigData.DualMapTimer + 1
+                    end
+                    
+                    saveCounter = saveCounter + 1
+                    if saveCounter >= 5 then SaveConfig(); saveCounter = 0 end
+                end
+
+                -- Transisi ke Map 1
+                if ConfigData.DualMapTimer >= dualMapInterval and ConfigData.AutoDualMap then
+                    ConfigData.DualMapCurrentState = "Map 1"
+                    ConfigData.DualMapTimer = 0
+                    ConfigData.DualMapSubTimer = 0
+                    SaveConfig()
+                end
+
+            elseif ConfigData.DualMapCurrentState == "Map 1" then
+                hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                local targetAngle = math.rad(poolAngles[ConfigData.DualMapPoolIndex])
+                local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
+
+                -- Initial teleport ke spot Map 1
+                if ConfigData.DualMapSubTimer == 0 and hrp and not isWeatherTPBusy then
+                    for i = 1, 4 do 
+                        if hrp and hrp.Parent then 
+                            hrp.CFrame = targetCFrame
+                            hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) 
+                        end
+                        task.wait(0.05) 
+                    end
+                end
+
+                local wasBusy = isWeatherTPBusy
+                
+                while ConfigData.DualMapSubTimer < rotateInterval and ConfigData.DualMapTimer < dualMapInterval and ConfigData.AutoDualMap and ConfigData.DualMapCurrentState == "Map 1" do
+                    hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                    if isWeatherTPBusy then 
+                        wasBusy = true
+                    elseif wasBusy then 
+                        wasBusy = false
+                        if hrp and hrp.Parent then 
+                            hrp.CFrame = targetCFrame
+                            hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) 
+                        end 
+                    end
+
+                    local sisaPindah = dualMapInterval - ConfigData.DualMapTimer
+                    local sisaRotate = rotateInterval - ConfigData.DualMapSubTimer
+                    
+                    if UIStatus_Fishing then
+                        if isWeatherTPBusy then 
+                            UIStatus_Fishing.Text = "MAP 1 (ROTATING): PAUSED (AUTO TP CUACA)"
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        else 
+                            UIStatus_Fishing.Text = "MAP 1 | SW: " .. formatSecondsToText(sisaPindah) .. " | RT: " .. formatSecondsToText(sisaRotate)
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(100, 200, 255) 
+                        end
+                    end
+                    
+                    task.wait(1)
+                    if not isWeatherTPBusy then
+                        ConfigData.DualMapSubTimer = ConfigData.DualMapSubTimer + 1
+                        ConfigData.DualMapTimer = ConfigData.DualMapTimer + 1
+                    end
+                    
+                    saveCounter = saveCounter + 1
+                    if saveCounter >= 5 then SaveConfig(); saveCounter = 0 end
+                end
+                
+                -- Memutar map (Rotasi index)
+                if ConfigData.DualMapSubTimer >= rotateInterval and ConfigData.DualMapTimer < dualMapInterval and ConfigData.AutoDualMap then
+                    ConfigData.DualMapSubTimer = 0
+                    ConfigData.DualMapPoolIndex = ConfigData.DualMapPoolIndex + 1
+                    if ConfigData.DualMapPoolIndex > #poolAngles then ConfigData.DualMapPoolIndex = 1 end
+                    SaveConfig()
+                end
+
+                -- Transisi ke Map 2
+                if ConfigData.DualMapTimer >= dualMapInterval and ConfigData.AutoDualMap then
+                    ConfigData.DualMapCurrentState = "Map 2"
+                    ConfigData.DualMapTimer = 0
+                    ConfigData.DualMapSubTimer = 0
+                    SaveConfig()
                 end
             end
-        else task.wait(1) end
+        else 
+            task.wait(1) 
+        end
     end
 end)
