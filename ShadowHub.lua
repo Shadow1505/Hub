@@ -97,17 +97,34 @@ end
 
 LoadConfig()
 
+-- FIX: Mencegah eksekusi otomatis berjalan di background sebelum UI memicu toggle
+ConfigData.AutoRotate = false
+ConfigData.AutoMap2 = false
+ConfigData.AutoDualMap = false
+
 -- ========================================================
 -- THEME MANAGER SYSTEM
 -- ========================================================
 local Themes = {
     ["Default"] = {
         bg = Color3.fromRGB(15, 15, 18), sidebar = Color3.fromRGB(20, 20, 24), content = Color3.fromRGB(25, 25, 30),
-        accent = Color3.fromRGB(140, 60, 255), text = Color3.fromRGB(240, 240, 240), subtext = Color3.fromRGB(170, 170, 170)
+        accent = Color3.fromRGB(140, 60, 255), text = Color3.fromRGB(240, 240, 240), subtext = Color3.fromRGB(170, 170, 170), stroke = Color3.fromRGB(40, 40, 50)
     },
     ["Elegant Gold"] = {
         bg = Color3.fromRGB(20, 18, 15), sidebar = Color3.fromRGB(26, 23, 20), content = Color3.fromRGB(36, 30, 25),
-        accent = Color3.fromRGB(212, 175, 55), text = Color3.fromRGB(250, 245, 235), subtext = Color3.fromRGB(180, 170, 150)
+        accent = Color3.fromRGB(212, 175, 55), text = Color3.fromRGB(250, 245, 235), subtext = Color3.fromRGB(180, 170, 150), stroke = Color3.fromRGB(50, 45, 30)
+    },
+    ["Crimson Blood"] = {
+        bg = Color3.fromRGB(18, 10, 10), sidebar = Color3.fromRGB(24, 15, 15), content = Color3.fromRGB(30, 20, 20),
+        accent = Color3.fromRGB(220, 20, 60), text = Color3.fromRGB(240, 230, 230), subtext = Color3.fromRGB(170, 150, 150), stroke = Color3.fromRGB(50, 30, 30)
+    },
+    ["Ocean Blue"] = {
+        bg = Color3.fromRGB(10, 15, 20), sidebar = Color3.fromRGB(15, 22, 30), content = Color3.fromRGB(20, 30, 40),
+        accent = Color3.fromRGB(0, 150, 255), text = Color3.fromRGB(230, 240, 250), subtext = Color3.fromRGB(150, 170, 190), stroke = Color3.fromRGB(30, 40, 50)
+    },
+    ["Neon Cyber"] = {
+        bg = Color3.fromRGB(10, 10, 15), sidebar = Color3.fromRGB(15, 15, 25), content = Color3.fromRGB(20, 20, 35),
+        accent = Color3.fromRGB(0, 255, 255), text = Color3.fromRGB(240, 255, 255), subtext = Color3.fromRGB(150, 180, 200), stroke = Color3.fromRGB(30, 30, 50)
     }
 }
 
@@ -123,15 +140,22 @@ local function ApplyTheme()
     
     for _, obj in ipairs(gui:GetDescendants()) do
         local role = obj:GetAttribute("ThemeRole")
-        if role == "bg" then obj.BackgroundColor3 = c_bg
-        elseif role == "sidebar" then obj.BackgroundColor3 = c_sidebar
-        elseif role == "content" then obj.BackgroundColor3 = c_content
-        elseif role == "accent_bg" then obj.BackgroundColor3 = c_accent
-        elseif role == "text" then obj.TextColor3 = c_text
-        elseif role == "subtext" then obj.TextColor3 = c_subtext
-        elseif role == "accent_text" then obj.TextColor3 = c_accent
-        elseif role == "stroke" then pcall(function() obj.Color = Color3.fromRGB(40, 40, 50) end)
+        if not role then continue end
+        
+        if role == "bg" then pcall(function() obj.BackgroundColor3 = c_bg end)
+        elseif role == "sidebar" then pcall(function() obj.BackgroundColor3 = c_sidebar end)
+        elseif role == "content" then pcall(function() obj.BackgroundColor3 = c_content end)
+        elseif role == "accent_bg" then pcall(function() obj.BackgroundColor3 = c_accent end)
+        elseif role == "text" then 
+            pcall(function() 
+                obj.TextColor3 = c_text 
+                if obj:IsA("TextButton") then obj.BackgroundColor3 = c_content end
+            end)
+        elseif role == "subtext" then pcall(function() obj.TextColor3 = c_subtext end)
+        elseif role == "accent_text" then pcall(function() obj.TextColor3 = c_accent end)
+        elseif role == "stroke" then pcall(function() obj.Color = t.stroke end)
         elseif role == "scroll" then pcall(function() obj.ScrollBarImageColor3 = c_accent end)
+        elseif role == "none" then pcall(function() obj.BackgroundColor3 = Color3.fromRGB(60, 60, 70) end)
         end
     end
 end
@@ -624,11 +648,9 @@ local function CreateTab(name, active)
         for pName, pData in pairs(Pages) do
             local isTarget = (pName == name)
             pData.Frame.Visible = isTarget; pData.Indicator.Visible = isTarget
-            pData.Button.BackgroundColor3 = isTarget and Color3.fromRGB(35, 35, 45) or c_sidebar
             pData.Button:SetAttribute("ThemeRole", isTarget and "content" or "sidebar")
-            pData.Button.TextColor3 = isTarget and c_text or c_subtext
-            ApplyTheme()
         end
+        ApplyTheme()
     end)
     return PageScroll
 end
@@ -832,6 +854,8 @@ local FishingSelectorFrame, FishingPopulate, FishingSelectBtn = CreateSelector(D
     ConfigData.SelectedFarmingMode = sel; SaveConfig()
     if ConfigData.AutoFishingToggle then
         ConfigData.AutoRotate = (sel == "Map 1 (Rotate)"); ConfigData.AutoMap2 = (sel == "Map 2 (Canyon)"); ConfigData.AutoDualMap = (sel == "Dual Map (Switch)")
+    else
+        ConfigData.AutoRotate = false; ConfigData.AutoMap2 = false; ConfigData.AutoDualMap = false
     end
 end)
 UI_Updaters["SelectedFarmingMode"] = function(newState) FishingSelectBtn.Text = newState; FishingSelectBtn.TextColor3 = c_text end
@@ -1046,7 +1070,7 @@ CreateToggle(DropPlayer, "Hide Character (Invisible)", "Invisible", function(sta
 end)
 
 local DropTheme = CreateDropdown(TabPlayerMods, "🎨 Tema UI Panel")
-CreateSelector(DropTheme, "Pilih Tema", {"Default", "Elegant Gold"}, function(sel)
+CreateSelector(DropTheme, "Pilih Tema", {"Default", "Elegant Gold", "Crimson Blood", "Ocean Blue", "Neon Cyber"}, function(sel)
     ConfigData.SelectedTheme = sel; SaveConfig(); ApplyTheme()
 end)
 
