@@ -21,6 +21,7 @@ local UI_Updaters = {}
 
 local DefaultConfig = {
     AutoTP = false,
+    AutoArcadia = false, -- NEW CONFIG ARCADIA
     AutoFishingToggle = false,
     SelectedFarmingMode = "Map 1 (Rotate)",
     AutoRotate = false,
@@ -167,12 +168,15 @@ local spotKordinat = {
     Board = CFrame.lookAt(Vector3.new(-855.63, 44.43, 5187.01), Vector3.new(-855.63, 44.43, 5187.01) + Vector3.new(0, 0, 1)),
     Volcano = CFrame.lookAt(Vector3.new(-813.46, 59.37, 5271.69), Vector3.new(-813.46, 59.37, 5271.69) + Vector3.new(1, 0, 1)),
     Storm = CFrame.lookAt(Vector3.new(-864.27, 56.06, 5309.37), Vector3.new(-864.27, 56.06, 5309.37) + Vector3.new(-1, 0, 1)),
-    Blizzard = CFrame.lookAt(Vector3.new(-968.19, 45.83, 5345.58), Vector3.new(-968.19, 45.83, 5345.58) + Vector3.new(-1, 0, -1))
+    Blizzard = CFrame.lookAt(Vector3.new(-968.19, 45.83, 5345.58), Vector3.new(-968.19, 45.83, 5345.58) + Vector3.new(-1, 0, -1)),
+    Arcadia = CFrame.new(Vector3.new(1338.10, 13.54, 2955.27)) * CFrame.Angles(0, math.rad(-178), 0)
 }
 local DatabaseIconCuaca = {["118379404229807"] = "Blizzard", ["105076841543450"] = "Storm", ["76632496002371"] = "Volcano"}
 local posisiSimpanan = nil
+local posisiSimpananArcadia = nil
 
 local isWeatherTPBusy = false
+local isArcadiaTPBusy = false
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
 local currentPoolIndex = 1
@@ -197,6 +201,32 @@ local function GetEventScheduleWIB()
         local nextHour = h + 1
         while nextHour % 3 ~= 1 do nextHour = nextHour + 1 end
         local jamSisa = nextHour - h - 1; local menitSisa = 59 - m; local detikSisa = 60 - s
+        return { state = "COOLDOWN", timeLeft = (jamSisa * 3600) + (menitSisa * 60) + detikSisa }
+    end
+end
+
+local function GetArcadiaScheduleWIB()
+    local utc_time = os.time()
+    local wib_time = utc_time + (7 * 3600)
+    local date = os.date("!*t", wib_time)
+    local h = date.hour; local m = date.min; local s = date.sec
+    
+    -- Arcadia hanya aktif 10 menit (menit ke 0 hingga ke 9)
+    if h % 3 == 1 and m < 10 then
+        local sisaDetik = (10 * 60) - ((m * 60) + s)
+        return { state = "ACTIVE", timeLeft = sisaDetik }
+    else
+        local nextHour = h
+        if h % 3 == 1 and m >= 10 then nextHour = h + 1 end
+        while nextHour % 3 ~= 1 do nextHour = nextHour + 1 end
+        
+        local jamSisa = nextHour - h
+        local menitSisa = 0 - m
+        local detikSisa = 0 - s
+        
+        if detikSisa < 0 then detikSisa = detikSisa + 60; menitSisa = menitSisa - 1 end
+        if menitSisa < 0 then menitSisa = menitSisa + 60; jamSisa = jamSisa - 1 end
+        
         return { state = "COOLDOWN", timeLeft = (jamSisa * 3600) + (menitSisa * 60) + detikSisa }
     end
 end
@@ -240,6 +270,14 @@ local function PulangKeSetPos()
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if hrp and posisiSimpanan then
         hrp.CFrame = posisiSimpanan
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end
+end
+
+local function PulangKeSetPosArcadia()
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if hrp and posisiSimpananArcadia then
+        hrp.CFrame = posisiSimpananArcadia
         hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     end
 end
@@ -848,6 +886,23 @@ end)
 BtnTPElementalManual.BackgroundColor3 = c_sidebar; BtnTPElementalManual.TextColor3 = c_accent
 BtnTPElementalManual:SetAttribute("ThemeRole", "accent_text"); Instance.new("UIStroke", BtnTPElementalManual).Color = c_accent
 
+local DropArcadia = CreateDropdown(TabAutomation, "Event Arcadia TP")
+local UIStatus_Arcadia = CreateStatusLabel(DropArcadia)
+CreateToggle(DropArcadia, "Enable Auto TP Arcadia", "AutoArcadia", function(state)
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if state then if hrp and not posisiSimpananArcadia then posisiSimpananArcadia = hrp.CFrame end
+    else isArcadiaTPBusy = false; UIStatus_Arcadia.Text = "SYSTEM PAUSED"; UIStatus_Arcadia.TextColor3 = c_subtext end
+end)
+local BtnTPArcadiaManual = CreateButton(DropArcadia, "Teleport Manual to Arcadia", function()
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if hrp and spotKordinat.Arcadia then
+        local targetCF = spotKordinat.Arcadia
+        hrp.CFrame = CFrame.new(targetCF.Position + Vector3.new(0, 3, 0)) * targetCF.Rotation; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end
+end)
+BtnTPArcadiaManual.BackgroundColor3 = c_sidebar; BtnTPArcadiaManual.TextColor3 = c_accent
+BtnTPArcadiaManual:SetAttribute("ThemeRole", "accent_text"); Instance.new("UIStroke", BtnTPArcadiaManual).Color = c_accent
+
 local DropFishing = CreateDropdown(TabAutomation, "🎣 Auto Fishing Manager")
 local fishingModes = {"Map 1 (Rotate)", "Map 2 (Canyon)", "Dual Map (Switch)"}
 local FishingSelectorFrame, FishingPopulate, FishingSelectBtn = CreateSelector(DropFishing, "Farming Mode", fishingModes, function(sel)
@@ -1294,6 +1349,51 @@ task.spawn(function()
     end
 end)
 
+-- ====== [THREAD 1.5]: AUTO TP ARCADIA ======
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if ConfigData.AutoArcadia then
+            local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then isArcadiaTPBusy = false; continue end
+            local schedule = GetArcadiaScheduleWIB()
+
+            if schedule.state == "COOLDOWN" then
+                if isArcadiaTPBusy then 
+                    isArcadiaTPBusy = false 
+                    if not ConfigData.AutoFishingToggle then PulangKeSetPosArcadia() end
+                end
+                
+                while ConfigData.AutoArcadia do
+                    local realTimeSchedule = GetArcadiaScheduleWIB()
+                    if realTimeSchedule.state == "ACTIVE" then break end 
+                    UIStatus_Arcadia.Text = "CD: " .. formatSecondsToText(realTimeSchedule.timeLeft)
+                    UIStatus_Arcadia.TextColor3 = Color3.fromRGB(255, 200, 50)
+                    task.wait(1)
+                end
+            elseif schedule.state == "ACTIVE" then
+                isArcadiaTPBusy = true
+                local targetCFrame = spotKordinat.Arcadia
+                while ConfigData.AutoArcadia do
+                    local realTimeSchedule = GetArcadiaScheduleWIB()
+                    if realTimeSchedule.state == "COOLDOWN" then break end 
+                    UIStatus_Arcadia.Text = "ARCADIA ACTIVE: " .. formatSecondsToText(realTimeSchedule.timeLeft)
+                    UIStatus_Arcadia.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    
+                    if hrp and targetCFrame and (hrp.Position - targetCFrame.Position).Magnitude > 25 then
+                        hrp.CFrame = CFrame.new(targetCFrame.Position + Vector3.new(0, 3, 0)) * targetCFrame.Rotation
+                        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    end
+                    task.wait(1)
+                end
+                isArcadiaTPBusy = false
+            end
+        else
+            isArcadiaTPBusy = false
+        end
+    end
+end)
+
 -- ====== [THREAD 2]: AUTO ROTATE MAP 1 ======
 task.spawn(function()
     while true do
@@ -1303,7 +1403,7 @@ task.spawn(function()
                 local targetAngle = math.rad(poolAngles[currentPoolIndex])
                 local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
                 
-                if not isWeatherTPBusy then
+                if not isWeatherTPBusy and not isArcadiaTPBusy then
                     for i = 1, 6 do
                         if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
                         task.wait(0.05)
@@ -1312,10 +1412,10 @@ task.spawn(function()
                 
                 currentPoolIndex = currentPoolIndex + 1; if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
                 
-                local elapsed = 0; local wasBusy = isWeatherTPBusy
+                local elapsed = 0; local wasBusy = isWeatherTPBusy or isArcadiaTPBusy
                 
                 while elapsed < rotateInterval and ConfigData.AutoRotate and not ConfigData.AutoDualMap do
-                    if isWeatherTPBusy then wasBusy = true
+                    if isWeatherTPBusy or isArcadiaTPBusy then wasBusy = true
                     elseif wasBusy then
                         wasBusy = false 
                         if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
@@ -1323,7 +1423,8 @@ task.spawn(function()
 
                     local sisaDetik = rotateInterval - elapsed
                     if UIStatus_Fishing then
-                        if isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 1 ROTATE: PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        if isArcadiaTPBusy then UIStatus_Fishing.Text = "MAP 1 ROTATE: PAUSED (AUTO TP ARCADIA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        elseif isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 1 ROTATE: PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
                         else UIStatus_Fishing.Text = "MAP 1 ROTATE: " .. formatSecondsToText(sisaDetik); UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100) end
                     end
                     task.wait(1); elapsed = elapsed + 1
@@ -1339,11 +1440,12 @@ task.spawn(function()
         if ConfigData.AutoMap2 and not ConfigData.AutoDualMap then
             local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
-                if not isWeatherTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then
+                if not isWeatherTPBusy and not isArcadiaTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then
                     hrp.CFrame = map2CFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0); hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
                 end
                 if UIStatus_Fishing then
-                    if isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 2 ACTIVE: PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                    if isArcadiaTPBusy then UIStatus_Fishing.Text = "MAP 2 ACTIVE: PAUSED (AUTO TP ARCADIA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                    elseif isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 2 ACTIVE: PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
                     else UIStatus_Fishing.Text = "MAP 2 ACTIVE (STAY STAYING)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100) end
                 end
             end
@@ -1361,7 +1463,7 @@ task.spawn(function()
             
             if ConfigData.DualMapCurrentState == "Map 2" then
                 -- Initial teleport saat pertama kali ke Map 2
-                if ConfigData.DualMapTimer == 0 and hrp and not isWeatherTPBusy then
+                if ConfigData.DualMapTimer == 0 and hrp and not isWeatherTPBusy and not isArcadiaTPBusy then
                     for i = 1, 6 do 
                         if hrp and hrp.Parent then
                             hrp.CFrame = map2CFrame
@@ -1374,14 +1476,17 @@ task.spawn(function()
 
                 while ConfigData.DualMapTimer < dualMapInterval and ConfigData.AutoDualMap and ConfigData.DualMapCurrentState == "Map 2" do
                     hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp and not isWeatherTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then 
+                    if hrp and not isWeatherTPBusy and not isArcadiaTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then 
                         hrp.CFrame = map2CFrame
                         hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) 
                     end
 
                     local sisaPindah = dualMapInterval - ConfigData.DualMapTimer
                     if UIStatus_Fishing then
-                        if isWeatherTPBusy then 
+                        if isArcadiaTPBusy then
+                            UIStatus_Fishing.Text = "MAP 2 (CANYON): PAUSED (AUTO TP ARCADIA)"
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        elseif isWeatherTPBusy then 
                             UIStatus_Fishing.Text = "MAP 2 (CANYON): PAUSED (AUTO TP CUACA)"
                             UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
                         else 
@@ -1391,7 +1496,7 @@ task.spawn(function()
                     end
                     
                     task.wait(1)
-                    if not isWeatherTPBusy then
+                    if not isWeatherTPBusy and not isArcadiaTPBusy then
                         ConfigData.DualMapTimer = ConfigData.DualMapTimer + 1
                     end
                     
@@ -1413,7 +1518,7 @@ task.spawn(function()
                 local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
 
                 -- Initial teleport ke spot Map 1
-                if ConfigData.DualMapSubTimer == 0 and hrp and not isWeatherTPBusy then
+                if ConfigData.DualMapSubTimer == 0 and hrp and not isWeatherTPBusy and not isArcadiaTPBusy then
                     for i = 1, 4 do 
                         if hrp and hrp.Parent then 
                             hrp.CFrame = targetCFrame
@@ -1423,11 +1528,11 @@ task.spawn(function()
                     end
                 end
 
-                local wasBusy = isWeatherTPBusy
+                local wasBusy = isWeatherTPBusy or isArcadiaTPBusy
                 
                 while ConfigData.DualMapSubTimer < rotateInterval and ConfigData.DualMapTimer < dualMapInterval and ConfigData.AutoDualMap and ConfigData.DualMapCurrentState == "Map 1" do
                     hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if isWeatherTPBusy then 
+                    if isWeatherTPBusy or isArcadiaTPBusy then 
                         wasBusy = true
                     elseif wasBusy then 
                         wasBusy = false
@@ -1441,7 +1546,10 @@ task.spawn(function()
                     local sisaRotate = rotateInterval - ConfigData.DualMapSubTimer
                     
                     if UIStatus_Fishing then
-                        if isWeatherTPBusy then 
+                        if isArcadiaTPBusy then
+                            UIStatus_Fishing.Text = "MAP 1 (ROTATING): PAUSED (AUTO TP ARCADIA)"
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
+                        elseif isWeatherTPBusy then 
                             UIStatus_Fishing.Text = "MAP 1 (ROTATING): PAUSED (AUTO TP CUACA)"
                             UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
                         else 
@@ -1451,7 +1559,7 @@ task.spawn(function()
                     end
                     
                     task.wait(1)
-                    if not isWeatherTPBusy then
+                    if not isWeatherTPBusy and not isArcadiaTPBusy then
                         ConfigData.DualMapSubTimer = ConfigData.DualMapSubTimer + 1
                         ConfigData.DualMapTimer = ConfigData.DualMapTimer + 1
                     end
