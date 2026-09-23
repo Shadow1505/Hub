@@ -4,6 +4,8 @@ local RunService = game:GetService("RunService")
 local MaterialService = game:GetService("MaterialService")
 local Lighting = game:GetService("Lighting")
 local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,9 +23,10 @@ local UI_Updaters = {}
 
 local DefaultConfig = {
     AutoTP = false,
-    AutoArcadia = false, -- NEW CONFIG ARCADIA
+    AutoArcadia = false, 
+    AutoPellet = false,
     AutoFishingToggle = false,
-    SelectedFarmingMode = "Map 1 (Rotate)",
+    SelectedFarmingMode = "Map 1 (Throne Room)",
     AutoRotate = false,
     AutoMap2 = false,
     AutoDualMap = false,
@@ -41,13 +44,11 @@ local DefaultConfig = {
     UISizeY = 320,
     AutoTeleportSpawn = false,
     
-    -- NEW DUAL MAP CONFIGS (STATE SAVING)
     DualMapCurrentState = "Map 2",
     DualMapTimer = 0,
     DualMapSubTimer = 0,
     DualMapPoolIndex = 1,
     
-    -- NEW CONFIGS
     StaffDetector = false,
     AutoReconnect = false,
     Freecam = false,
@@ -84,6 +85,12 @@ local function LoadConfig()
         pcall(function()
             local decoded = HttpService:JSONDecode(readfile(ConfigFileName))
             for k, v in pairs(decoded) do ConfigData[k] = v end
+            
+            if ConfigData.SelectedFarmingMode == "Map 1 (Rotate)" then
+                ConfigData.SelectedFarmingMode = "Map 1 (Throne Room)"
+            elseif ConfigData.SelectedFarmingMode == "Dual Map (Switch)" or ConfigData.SelectedFarmingMode == "Triple Map (Throne, Canyon, Arcadia)" then
+                ConfigData.SelectedFarmingMode = "Dual Map (Throne, Canyon)"
+            end
         end)
     end
 end
@@ -98,7 +105,6 @@ end
 
 LoadConfig()
 
--- FIX: Mencegah eksekusi otomatis berjalan di background sebelum UI memicu toggle
 ConfigData.AutoRotate = false
 ConfigData.AutoMap2 = false
 ConfigData.AutoDualMap = false
@@ -169,7 +175,8 @@ local spotKordinat = {
     Volcano = CFrame.lookAt(Vector3.new(-813.46, 59.37, 5271.69), Vector3.new(-813.46, 59.37, 5271.69) + Vector3.new(1, 0, 1)),
     Storm = CFrame.lookAt(Vector3.new(-864.27, 56.06, 5309.37), Vector3.new(-864.27, 56.06, 5309.37) + Vector3.new(-1, 0, 1)),
     Blizzard = CFrame.lookAt(Vector3.new(-968.19, 45.83, 5345.58), Vector3.new(-968.19, 45.83, 5345.58) + Vector3.new(-1, 0, -1)),
-    Arcadia = CFrame.new(Vector3.new(1338.10, 13.54, 2955.27)) * CFrame.Angles(0, math.rad(-178), 0)
+    Arcadia = CFrame.new(Vector3.new(1338.10, 13.54, 2955.27)) * CFrame.Angles(0, math.rad(-178), 0),
+    PelletMachine = CFrame.new(1323.34, 13.34, 2968.82)
 }
 local DatabaseIconCuaca = {["118379404229807"] = "Blizzard", ["105076841543450"] = "Storm", ["76632496002371"] = "Volcano"}
 local posisiSimpanan = nil
@@ -177,6 +184,7 @@ local posisiSimpananArcadia = nil
 
 local isWeatherTPBusy = false
 local isArcadiaTPBusy = false
+local isPelletExecuting = false
 local standPositionRot = Vector3.new(-1290.24, -855.68, 5596.16)
 local poolAngles = {-103.43, 135.57, 15.08}
 local currentPoolIndex = 1
@@ -211,13 +219,12 @@ local function GetArcadiaScheduleWIB()
     local date = os.date("!*t", wib_time)
     local h = date.hour; local m = date.min; local s = date.sec
     
-    -- Arcadia hanya aktif 10 menit (menit ke 0 hingga ke 9)
-    if h % 3 == 1 and m < 10 then
-        local sisaDetik = (10 * 60) - ((m * 60) + s)
+    if h % 3 == 1 and m < 3 then
+        local sisaDetik = (3 * 60) - ((m * 60) + s)
         return { state = "ACTIVE", timeLeft = sisaDetik }
     else
         local nextHour = h
-        if h % 3 == 1 and m >= 10 then nextHour = h + 1 end
+        if h % 3 == 1 and m >= 3 then nextHour = h + 1 end
         while nextHour % 3 ~= 1 do nextHour = nextHour + 1 end
         
         local jamSisa = nextHour - h
@@ -693,12 +700,13 @@ local function CreateTab(name, active)
     return PageScroll
 end
 
-local TabAutomation = CreateTab("⚡ Automation", true)
-local TabBooster    = CreateTab("🚀 Booster & RAM", false)
-local TabWebhooks   = CreateTab("📡 Discord Webhooks", false)
-local TabTeleport   = CreateTab("🌍 Teleport Island", false)
-local TabPlayerMods = CreateTab("🛠️ Player & Server", false)
-local TabConfig     = CreateTab("⚙️ Config Manager", false)
+local TabAutomation   = CreateTab("⚡ Automation", true)
+local TabArcadiaEvent = CreateTab("🎪 EVENT ARCADIA", false)
+local TabBooster      = CreateTab("🚀 Booster & RAM", false)
+local TabWebhooks     = CreateTab("📡 Discord Webhooks", false)
+local TabTeleport     = CreateTab("🌍 Teleport Island", false)
+local TabPlayerMods   = CreateTab("🛠️ Player & Server", false)
+local TabConfig       = CreateTab("⚙️ Config Manager", false)
 
 local function CreateDropdown(parent, titleText)
     local DropdownFrame = Instance.new("Frame", parent)
@@ -861,7 +869,7 @@ local function CreateInfoLabel(parent, text)
 end
 
 -- ========================================================
--- 6. MENU SETUP (AUTOMATION, BOOSTER, WEBHOOKS, TELEPORT)
+-- 6. MENU SETUP (AUTOMATION, ARCADIA, BOOSTER, WEBHOOKS, TELEPORT)
 -- ========================================================
 local DropElemental = CreateDropdown(TabAutomation, "Event Elemental TP")
 local UIStatus_Elemental = CreateStatusLabel(DropElemental)
@@ -904,38 +912,66 @@ BtnTPArcadiaManual.BackgroundColor3 = c_sidebar; BtnTPArcadiaManual.TextColor3 =
 BtnTPArcadiaManual:SetAttribute("ThemeRole", "accent_text"); Instance.new("UIStroke", BtnTPArcadiaManual).Color = c_accent
 
 local DropFishing = CreateDropdown(TabAutomation, "🎣 Auto Fishing Manager")
-local fishingModes = {"Map 1 (Rotate)", "Map 2 (Canyon)", "Dual Map (Switch)"}
+local fishingModes = {"Map 1 (Throne Room)", "Map 2 (Canyon)", "Dual Map (Throne, Canyon)"}
 local FishingSelectorFrame, FishingPopulate, FishingSelectBtn = CreateSelector(DropFishing, "Farming Mode", fishingModes, function(sel)
     ConfigData.SelectedFarmingMode = sel; SaveConfig()
     if ConfigData.AutoFishingToggle then
-        ConfigData.AutoRotate = (sel == "Map 1 (Rotate)"); ConfigData.AutoMap2 = (sel == "Map 2 (Canyon)"); ConfigData.AutoDualMap = (sel == "Dual Map (Switch)")
+        ConfigData.AutoRotate = (sel == "Map 1 (Throne Room)")
+        ConfigData.AutoMap2 = (sel == "Map 2 (Canyon)")
+        ConfigData.AutoDualMap = (sel == "Dual Map (Throne, Canyon)")
     else
         ConfigData.AutoRotate = false; ConfigData.AutoMap2 = false; ConfigData.AutoDualMap = false
     end
 end)
 UI_Updaters["SelectedFarmingMode"] = function(newState) FishingSelectBtn.Text = newState; FishingSelectBtn.TextColor3 = c_text end
-if not ConfigData.SelectedFarmingMode then ConfigData.SelectedFarmingMode = "Map 1 (Rotate)" end
+if not ConfigData.SelectedFarmingMode then ConfigData.SelectedFarmingMode = "Map 1 (Throne Room)" end
 FishingSelectBtn.Text = ConfigData.SelectedFarmingMode; FishingSelectBtn.TextColor3 = c_text
 
 CreateToggle(DropFishing, "Enable Auto Fishing", "AutoFishingToggle", function(state)
-    if state then ConfigData.AutoRotate = (ConfigData.SelectedFarmingMode == "Map 1 (Rotate)"); ConfigData.AutoMap2 = (ConfigData.SelectedFarmingMode == "Map 2 (Canyon)"); ConfigData.AutoDualMap = (ConfigData.SelectedFarmingMode == "Dual Map (Switch)")
-    else ConfigData.AutoRotate = false; ConfigData.AutoMap2 = false; ConfigData.AutoDualMap = false end
+    if state then 
+        ConfigData.AutoRotate = (ConfigData.SelectedFarmingMode == "Map 1 (Throne Room)")
+        ConfigData.AutoMap2 = (ConfigData.SelectedFarmingMode == "Map 2 (Canyon)")
+        ConfigData.AutoDualMap = (ConfigData.SelectedFarmingMode == "Dual Map (Throne, Canyon)")
+    else 
+        ConfigData.AutoRotate = false; ConfigData.AutoMap2 = false; ConfigData.AutoDualMap = false 
+    end
 end)
 local UIStatus_Fishing = CreateStatusLabel(DropFishing)
 if not ConfigData.AutoFishingToggle then UIStatus_Fishing.Text = "AUTO FISHING: OFF"; UIStatus_Fishing.TextColor3 = c_subtext end
 
-local BtnResetDualMap = CreateButton(DropFishing, "🔄 Reset Dual Map State", function()
+local BtnResetDualMap = CreateButton(DropFishing, "🔄 Reset Farm State", function()
     ConfigData.DualMapCurrentState = "Map 2"
     ConfigData.DualMapTimer = 0
     ConfigData.DualMapSubTimer = 0
     ConfigData.DualMapPoolIndex = 1
     SaveConfig()
-    BtnResetDualMap.Text = "✅ Dual Map State Reset!"
+    BtnResetDualMap.Text = "✅ Farm State Reset!"
     BtnResetDualMap.TextColor3 = Color3.fromRGB(100, 255, 100)
     task.delay(1.5, function() 
-        BtnResetDualMap.Text = "🔄 Reset Dual Map State" 
+        BtnResetDualMap.Text = "🔄 Reset Farm State" 
         BtnResetDualMap.TextColor3 = c_text
     end)
+end)
+
+-- ========================================================
+-- TAB ARCADIA EVENT (AUTO PELLET MACHINE ENHANCED STATUS)
+-- ========================================================
+local DropPellet = CreateDropdown(TabArcadiaEvent, "🎰 Pellet Machine Automation")
+local UIStatus_Pellet = CreateStatusLabel(DropPellet)
+
+if not ConfigData.AutoPellet then 
+    UIStatus_Pellet.Text = "AUTO PELLET: OFF"
+    UIStatus_Pellet.TextColor3 = c_subtext 
+end
+
+CreateToggle(DropPellet, "Enable Auto Pellet Machine", "AutoPellet", function(state)
+    if state then
+        UIStatus_Pellet.Text = "AUTO PELLET: ON (MENUNGGU SIKLUS)"
+        UIStatus_Pellet.TextColor3 = Color3.fromRGB(50, 255, 100)
+    else
+        UIStatus_Pellet.Text = "AUTO PELLET: OFF"
+        UIStatus_Pellet.TextColor3 = c_subtext
+    end
 end)
 
 local DropBooster = CreateDropdown(TabBooster, "🚀 Graphic & Performance Booster")
@@ -1045,23 +1081,52 @@ BtnReset.MouseButton1Click:Connect(function()
 end)
 
 -- ==========================================================
--- 6.5. PLAYER & SERVER MODS (UPDATED UI LAYOUT)
+-- 6.5. PLAYER & SERVER MODS 
 -- ==========================================================
 local DropSafety = CreateDropdown(TabPlayerMods, "🛡️ Server & Safety Mods")
 CreateToggle(DropSafety, "Staff Detector & Auto Hop", "StaffDetector", function(state) end)
+
+-- [FIXED] AUTO RECONNECT LEBIH KONSISTEN DENGAN LOOP RETRY TELEPORTASI
+local PromptOverlay = CoreGui:FindFirstChild("RobloxPromptGui") and CoreGui.RobloxPromptGui:FindFirstChild("promptOverlay")
+if PromptOverlay then
+    PromptOverlay.ChildAdded:Connect(function(child)
+        if ConfigData.AutoReconnect and child.Name == "ErrorPrompt" then
+            local ts = game:GetService("TeleportService")
+            while true do
+                task.wait(2)
+                pcall(function() ts:Teleport(game.PlaceId, player) end)
+            end
+        end
+    end)
+end
 CreateToggle(DropSafety, "Auto Reconnect (Anti DC/Kick)", "AutoReconnect", function(state) end)
-CreateButton(DropSafety, "🔄 Rejoin Server (Sama)", function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player) end)
+
+-- [FIXED] REJOIN SERVER SAMA DIBALUT PCALL AGAR TIDAK ERROR
+CreateButton(DropSafety, "🔄 Rejoin Server (Sama)", function() 
+    local ts = game:GetService("TeleportService")
+    pcall(function() ts:TeleportToPlaceInstance(game.PlaceId, game.JobId, player) end)
+end)
+
+-- [FIXED] SERVER HOP MENGGUNAKAN FALLBACK HTTP_REQUEST DAN PENGHINDARAN SERVER PENUH
 CreateButton(DropSafety, "🌍 Server Hop (Lainnya)", function()
     local Http = game:GetService("HttpService")
     local TPS = game:GetService("TeleportService")
-    local Api = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+    local Api = "https://games.roblox.com/v1/games/" .. tostring(game.PlaceId) .. "/servers/Public?sortOrder=Asc&limit=100"
     pcall(function()
-        local data = Http:JSONDecode(game:HttpGet(Api))
+        local req = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+        local response = req and req({Url = Api, Method = "GET"}).Body or game:HttpGet(Api)
+        local data = Http:JSONDecode(response)
         if data and data.data then
+            local servers = {}
             for _, srv in ipairs(data.data) do
-                if srv.playing < srv.maxPlayers and srv.id ~= game.JobId then
-                    TPS:TeleportToPlaceInstance(game.PlaceId, srv.id, player); break
+                if type(srv) == "table" and tonumber(srv.playing) and tonumber(srv.maxPlayers) and srv.playing < srv.maxPlayers - 1 and srv.id ~= game.JobId then
+                    table.insert(servers, srv.id)
                 end
+            end
+            if #servers > 0 then
+                TPS:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], player)
+            else
+                TPS:Teleport(game.PlaceId, player)
             end
         end
     end)
@@ -1098,21 +1163,14 @@ end)
 
 local DropPlayer = CreateDropdown(TabPlayerMods, "🦸 Player Feature")
 
--- 1. SPRINT FEATURE
 CreateToggle(DropPlayer, "Enable Custom Sprint", "SprintToggle", function(state) end)
 CreateTextBox(DropPlayer, "Walk Speed (Default: 16)", "SprintSpeed", function(txt) end)
-
--- 2. FLY MODE FEATURE
 CreateToggle(DropPlayer, "Enable Fly Mode", "FlyMode", function(state) end)
 CreateTextBox(DropPlayer, "Fly Speed (Default: 50)", "FlySpeed", function(txt) end)
-
--- 3. HIDE STATS & ROBLOX PLUS BADGE
 CreateToggle(DropPlayer, "Hide Stats (Fake Name/Lv)", "HideStats", function(state) end)
 CreateTextBox(DropPlayer, "Custom Fake Name", "CustomName", function(txt) end)
 CreateTextBox(DropPlayer, "Custom Fake Level", "CustomLevel", function(txt) end)
 CreateToggle(DropPlayer, "Roblox Plus Verification Logo", "RobloxPlusBadge", function(state) end)
-
--- 4. OTHER PLAYER MODS
 CreateToggle(DropPlayer, "Infinite Jump", "InfiniteJump", function(state) end)
 CreateToggle(DropPlayer, "No Clip (Tembus Objek)", "NoClip", function(state) end)
 CreateToggle(DropPlayer, "Lava Kill Immunity", "LavaImmunity", function(state) end)
@@ -1130,19 +1188,17 @@ CreateSelector(DropTheme, "Pilih Tema", {"Default", "Elegant Gold", "Crimson Blo
 end)
 
 -- ==========================================================
--- 7. BACKGROUND ENGINES & THREADS (PERBAIKAN BUG)
+-- 7. BACKGROUND ENGINES & THREADS
 -- ==========================================================
 ApplyTheme()
 player.CameraMaxZoomDistance = ConfigData.UnlimitedZoom and math.huge or 128
 
--- Infinite Jump Thread
 UserInputService.JumpRequest:Connect(function()
     if ConfigData.InfiniteJump and player.Character and player.Character:FindFirstChildOfClass("Humanoid") then
         player.Character:FindFirstChildOfClass("Humanoid"):ChangeState(Enum.HumanoidStateType.Jumping)
     end
 end)
 
--- Freecam PC Toggle Handler (F3)
 UserInputService.InputBegan:Connect(function(input, gp)
     if not gp and input.KeyCode == Enum.KeyCode.F3 then
         ConfigData.Freecam = not ConfigData.Freecam
@@ -1150,24 +1206,20 @@ UserInputService.InputBegan:Connect(function(input, gp)
     end
 end)
 
--- Mods Loop (Stepped)
 RunService.Stepped:Connect(function()
     local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     
-    -- NoClip
     if ConfigData.NoClip and char then
         for _, v in pairs(char:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide = false end end
     end
     
-    -- Walk Speed (Sprint)
     if hum then 
         pcall(function() 
             hum.WalkSpeed = ConfigData.SprintToggle and (tonumber(ConfigData.SprintSpeed) or 16) or 16 
         end) 
     end
     
-    -- Fly Mode (Fix Bug: Memakai BodyVelocity & BodyGyro agar tidak nyangkut)
     if ConfigData.FlyMode and hrp and hum then
         local cam = workspace.CurrentCamera
         local ctrl = {f = 0, b = 0, l = 0, r = 0}
@@ -1191,7 +1243,6 @@ RunService.Stepped:Connect(function()
         if hrp:FindFirstChild("ShadowFlyGyro") then hrp.ShadowFlyGyro:Destroy() end
     end
 
-    -- Freecam Movement Logic (Fix Bug: Memakai Dummy Model agar arah kamera tetap bisa dirotasi)
     if ConfigData.Freecam then
         local dummy = workspace:FindFirstChild("ShadowFreecamDummy")
         if dummy and dummy.PrimaryPart then
@@ -1209,7 +1260,6 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Lava Immunity, Hide Stats & Roblox Plus Loop
 task.spawn(function()
     while true do
         task.wait(1)
@@ -1249,7 +1299,6 @@ task.spawn(function()
     end
 end)
 
--- Staff Detector
 Players.PlayerAdded:Connect(function(p)
     if ConfigData.StaffDetector then
         local isStaff = false
@@ -1269,16 +1318,6 @@ Players.PlayerAdded:Connect(function(p)
     end
 end)
 
--- Auto Reconnect (Error Prompt Listener)
-CoreGui:FindFirstChild("RobloxPromptGui").promptOverlay.ChildAdded:Connect(function(child)
-    if ConfigData.AutoReconnect and child.Name == "ErrorPrompt" then
-        task.wait(2); TeleportService:Teleport(game.PlaceId, player)
-    end
-end)
-
--- ==========================================================
--- ORIGINAL AUTOMATION THREADS
--- ==========================================================
 task.spawn(function()
     while true do
         task.wait(1)
@@ -1321,7 +1360,9 @@ task.spawn(function()
                 end
             elseif schedule.state == "ACTIVE" then
                 UIStatus_Elemental.Text = "MENUJU PAPAN..."; UIStatus_Elemental.TextColor3 = Color3.fromRGB(100, 200, 255)
-                hrp.CFrame = spotKordinat.Board; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); task.wait(1.5)
+                if not isPelletExecuting then
+                    hrp.CFrame = spotKordinat.Board; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); task.wait(1.5)
+                end
                 
                 local cuacaAktif = GetWeatherIconOnly()
                 if cuacaAktif then
@@ -1332,7 +1373,7 @@ task.spawn(function()
                         UIStatus_Elemental.Text = string.upper(cuacaAktif) .. ": " .. formatSecondsToText(realTimeSchedule.timeLeft)
                         UIStatus_Elemental.TextColor3 = Color3.fromRGB(50, 255, 100)
                         
-                        if hrp and targetCFrame and (hrp.Position - targetCFrame.Position).Magnitude > 25 then
+                        if hrp and targetCFrame and (hrp.Position - targetCFrame.Position).Magnitude > 25 and not isPelletExecuting then
                             hrp.CFrame = CFrame.new(targetCFrame.Position + Vector3.new(0, 3, 0)) * targetCFrame.Rotation
                             hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                         end
@@ -1358,7 +1399,10 @@ task.spawn(function()
             if not hrp then isArcadiaTPBusy = false; continue end
             local schedule = GetArcadiaScheduleWIB()
 
-            if schedule.state == "COOLDOWN" then
+            -- Pemicu TP Arcadia: Saat event ACTIVE atau saat waktu tunggu COOLDOWN <= 49 menit (2940 detik)
+            local isArcadiaTime = (schedule.state == "ACTIVE") or (schedule.state == "COOLDOWN" and schedule.timeLeft <= 2940)
+
+            if not isArcadiaTime then
                 if isArcadiaTPBusy then 
                     isArcadiaTPBusy = false 
                     if not ConfigData.AutoFishingToggle then PulangKeSetPosArcadia() end
@@ -1366,21 +1410,30 @@ task.spawn(function()
                 
                 while ConfigData.AutoArcadia do
                     local realTimeSchedule = GetArcadiaScheduleWIB()
-                    if realTimeSchedule.state == "ACTIVE" then break end 
+                    local checkActive = (realTimeSchedule.state == "ACTIVE") or (realTimeSchedule.state == "COOLDOWN" and realTimeSchedule.timeLeft <= 2940)
+                    if checkActive then break end 
                     UIStatus_Arcadia.Text = "CD: " .. formatSecondsToText(realTimeSchedule.timeLeft)
                     UIStatus_Arcadia.TextColor3 = Color3.fromRGB(255, 200, 50)
                     task.wait(1)
                 end
-            elseif schedule.state == "ACTIVE" then
+            else
                 isArcadiaTPBusy = true
                 local targetCFrame = spotKordinat.Arcadia
                 while ConfigData.AutoArcadia do
                     local realTimeSchedule = GetArcadiaScheduleWIB()
-                    if realTimeSchedule.state == "COOLDOWN" then break end 
-                    UIStatus_Arcadia.Text = "ARCADIA ACTIVE: " .. formatSecondsToText(realTimeSchedule.timeLeft)
-                    UIStatus_Arcadia.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    local checkActive = (realTimeSchedule.state == "ACTIVE") or (realTimeSchedule.state == "COOLDOWN" and realTimeSchedule.timeLeft <= 2940)
+                    if not checkActive then break end 
                     
-                    if hrp and targetCFrame and (hrp.Position - targetCFrame.Position).Magnitude > 25 then
+                    if realTimeSchedule.state == "ACTIVE" then
+                        UIStatus_Arcadia.Text = "ARCADIA ACTIVE: " .. formatSecondsToText(realTimeSchedule.timeLeft)
+                        UIStatus_Arcadia.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    else
+                        UIStatus_Arcadia.Text = "ARCADIA PREPARE: " .. formatSecondsToText(realTimeSchedule.timeLeft)
+                        UIStatus_Arcadia.TextColor3 = Color3.fromRGB(100, 200, 255)
+                    end
+                    
+                    -- TP dan stay di Arcadia, namun tidak mengunci/recall saat Auto Pellet Machine sedang berjalan
+                    if hrp and targetCFrame and (hrp.Position - targetCFrame.Position).Magnitude > 25 and not isPelletExecuting then
                         hrp.CFrame = CFrame.new(targetCFrame.Position + Vector3.new(0, 3, 0)) * targetCFrame.Rotation
                         hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                     end
@@ -1394,198 +1447,334 @@ task.spawn(function()
     end
 end)
 
--- ====== [THREAD 2]: AUTO ROTATE MAP 1 ======
-task.spawn(function()
-    while true do
-        if ConfigData.AutoRotate and not ConfigData.AutoDualMap then
-            local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local targetAngle = math.rad(poolAngles[currentPoolIndex])
-                local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
-                
-                if not isWeatherTPBusy and not isArcadiaTPBusy then
-                    for i = 1, 6 do
-                        if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
-                        task.wait(0.05)
-                    end
-                end
-                
-                currentPoolIndex = currentPoolIndex + 1; if currentPoolIndex > #poolAngles then currentPoolIndex = 1 end
-                
-                local elapsed = 0; local wasBusy = isWeatherTPBusy or isArcadiaTPBusy
-                
-                while elapsed < rotateInterval and ConfigData.AutoRotate and not ConfigData.AutoDualMap do
-                    if isWeatherTPBusy or isArcadiaTPBusy then wasBusy = true
-                    elseif wasBusy then
-                        wasBusy = false 
-                        if hrp and hrp.Parent then hrp.CFrame = targetCFrame; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end
-                    end
-
-                    local sisaDetik = rotateInterval - elapsed
-                    if UIStatus_Fishing then
-                        if isArcadiaTPBusy then UIStatus_Fishing.Text = "MAP 1 ROTATE: PAUSED (AUTO TP ARCADIA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        elseif isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 1 ROTATE: PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        else UIStatus_Fishing.Text = "MAP 1 ROTATE: " .. formatSecondsToText(sisaDetik); UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100) end
-                    end
-                    task.wait(1); elapsed = elapsed + 1
-                end
-            else task.wait(1) end
-        else task.wait(1) end
+-- ====== [THREAD 1.75]: AUTO PELLET MACHINE PERFECT LOGIC ======
+local function clickTargetUI(targetButton)
+    if targetButton and targetButton.Visible and targetButton.AbsoluteSize.X > 0 then
+        local absPos = targetButton.AbsolutePosition
+        local absSize = targetButton.AbsoluteSize
+        local inset = GuiService:GetGuiInset()
+        
+        local clickX = absPos.X + (absSize.X / 2)
+        local clickY = absPos.Y + (absSize.Y / 2) + inset.Y
+        
+        pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
+        end)
+        return true
     end
-end)
+    return false
+end
 
--- ====== [THREAD 3]: AUTO MAP 2 CANYON ======
-task.spawn(function()
-    while true do
-        if ConfigData.AutoMap2 and not ConfigData.AutoDualMap then
-            local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                if not isWeatherTPBusy and not isArcadiaTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then
-                    hrp.CFrame = map2CFrame; hrp.AssemblyLinearVelocity = Vector3.new(0,0,0); hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
-                end
-                if UIStatus_Fishing then
-                    if isArcadiaTPBusy then UIStatus_Fishing.Text = "MAP 2 ACTIVE: PAUSED (AUTO TP ARCADIA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                    elseif isWeatherTPBusy then UIStatus_Fishing.Text = "MAP 2 ACTIVE: PAUSED (AUTO TP CUACA PRIORITY)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                    else UIStatus_Fishing.Text = "MAP 2 ACTIVE (STAY STAYING)"; UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100) end
+local function findCloseButton(uiContainer)
+    local candidates = {}
+    
+    for _, gui in pairs(uiContainer:GetDescendants()) do
+        if gui:IsA("GuiButton") and gui.Visible and gui.AbsoluteSize.X > 0 then
+            table.insert(candidates, gui)
+        end
+    end
+    
+    for _, gui in ipairs(candidates) do
+        local name = string.lower(gui.Name)
+        local txt = gui:IsA("TextButton") and string.lower(gui.Text or "") or ""
+        if string.find(name, "close") or string.find(name, "exit") or name == "x" or txt == "x" then
+            return gui
+        end
+    end
+    
+    local bestGuess = nil
+    local highestScore = -math.huge
+    
+    for _, gui in ipairs(candidates) do
+        local absSize = gui.AbsoluteSize
+        local absPos = gui.AbsolutePosition
+        
+        local ratio = math.max(absSize.X, absSize.Y) / math.max(1, math.min(absSize.X, absSize.Y))
+        if ratio <= 2.5 and absSize.X < 90 and absSize.Y < 90 then
+            local score = absPos.X - (absPos.Y * 3) 
+            if score > highestScore then
+                highestScore = score
+                bestGuess = gui
+            end
+        end
+    end
+    
+    return bestGuess
+end
+
+local function firePelletPrompt()
+    local fired = false
+    for _, desc in pairs(workspace:GetDescendants()) do
+        if desc:IsA("ProximityPrompt") then
+            local parentPart = desc.Parent
+            local isNear = true
+            if parentPart and parentPart:IsA("BasePart") then
+                isNear = (parentPart.Position - spotKordinat.PelletMachine.Position).Magnitude < 25
+            end
+            if isNear and (string.find(string.lower(desc.ObjectText or ""), "pellet") or string.find(string.lower(desc.ActionText or ""), "use") or string.find(string.lower(desc.ObjectText or ""), "machine")) then
+                if fireproximityprompt then
+                    fireproximityprompt(desc, 1, true)
+                    fired = true
                 end
             end
-            task.wait(1)
-        else task.wait(1) end
+        end
     end
-end)
+    
+    if not fired then
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        task.wait(0.2)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+    end
+end
 
--- ====== [THREAD 4]: AUTO DUAL MAP SWITCH (UPDATED ANTI-DC & RESUME) ======
-task.spawn(function()
-    local saveCounter = 0
-    while true do
-        if ConfigData.AutoDualMap then
-            local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
+local function processFeedMachineAndClose()
+    for attempt = 1, 6 do
+        local targetFeedButton = nil
+        local isFull = false
+        local isNotEnough = false
+        local mainUIContainer = nil
+        
+        for _, gui in pairs(player.PlayerGui:GetDescendants()) do
+            if (gui:IsA("TextLabel") or gui:IsA("TextButton")) and gui.Visible then
+                local txt = string.lower(gui.Text or "")
+                
+                if string.find(txt, "ghost slots full") then
+                    isFull = true
+                    local parent = gui
+                    while parent and not parent:IsA("ScreenGui") do
+                        parent = parent.Parent
+                    end
+                    mainUIContainer = parent or player.PlayerGui
+                    break
+                elseif string.find(txt, "need") and string.find(txt, "more") then
+                    isNotEnough = true
+                    local parent = gui
+                    while parent and not parent:IsA("ScreenGui") do
+                        parent = parent.Parent
+                    end
+                    mainUIContainer = parent or player.PlayerGui
+                    break
+                elseif string.find(txt, "feed machine") then
+                    local parent = gui
+                    for i = 1, 5 do
+                        if parent and parent:IsA("GuiButton") then
+                            targetFeedButton = parent
+                            break
+                        end
+                        parent = parent.Parent
+                    end
+                end
+            end
+        end
+        
+        if isFull then
+            if UIStatus_Pellet then 
+                UIStatus_Pellet.Text = "STATUS: MESIN FULL! CLOSING..." 
+                UIStatus_Pellet.TextColor3 = Color3.fromRGB(255, 100, 100) 
+            end
+            task.wait(0.5)
             
-            if ConfigData.DualMapCurrentState == "Map 2" then
-                -- Initial teleport saat pertama kali ke Map 2
-                if ConfigData.DualMapTimer == 0 and hrp and not isWeatherTPBusy and not isArcadiaTPBusy then
-                    for i = 1, 6 do 
-                        if hrp and hrp.Parent then
-                            hrp.CFrame = map2CFrame
-                            hrp.AssemblyLinearVelocity = Vector3.new(0,0,0)
-                            hrp.AssemblyAngularVelocity = Vector3.new(0,0,0)
-                        end
-                        task.wait(0.05) 
-                    end
-                end
+            local closeButton = findCloseButton(mainUIContainer or player.PlayerGui)
+            if closeButton then
+                clickTargetUI(closeButton)
+                task.wait(0.5)
+            end
+            break
+        end
 
-                while ConfigData.DualMapTimer < dualMapInterval and ConfigData.AutoDualMap and ConfigData.DualMapCurrentState == "Map 2" do
-                    hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp and not isWeatherTPBusy and not isArcadiaTPBusy and (hrp.Position - map2Pos).Magnitude > 5 then 
+        if isNotEnough then
+            if UIStatus_Pellet then 
+                UIStatus_Pellet.Text = "STATUS: PELLET TIDAK CUKUP! CLOSING..." 
+                UIStatus_Pellet.TextColor3 = Color3.fromRGB(255, 150, 50) 
+            end
+            task.wait(0.5)
+            
+            local closeButton = findCloseButton(mainUIContainer or player.PlayerGui)
+            if closeButton then
+                clickTargetUI(closeButton)
+                task.wait(0.5)
+            end
+            break
+        end
+        
+        if targetFeedButton then
+            if UIStatus_Pellet then 
+                UIStatus_Pellet.Text = "STATUS: FEEDING MACHINE (" .. attempt .. "/6)" 
+                UIStatus_Pellet.TextColor3 = Color3.fromRGB(50, 255, 100) 
+            end
+            clickTargetUI(targetFeedButton)
+            task.wait(1.5)
+        else
+            task.wait(0.5)
+        end
+    end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if ConfigData.AutoPellet and not isPelletExecuting then
+            local character = player.Character
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+            if not hrp then continue end
+            
+            isPelletExecuting = true
+            local originalCFrame = hrp.CFrame
+            
+            -- LANGKAH 1: Teleport ke Mesin Pellet
+            if UIStatus_Pellet then 
+                UIStatus_Pellet.Text = "STATUS: MENUJU MESIN PELLET" 
+                UIStatus_Pellet.TextColor3 = Color3.fromRGB(255, 200, 50) 
+            end
+            hrp.CFrame = spotKordinat.PelletMachine
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            task.wait(1.5)
+            
+            -- LANGKAH 2: Eksekusi ProximityPrompt Mesin ("E")
+            if UIStatus_Pellet then 
+                UIStatus_Pellet.Text = "STATUS: MENGAKTIFKAN MESIN (E)" 
+                UIStatus_Pellet.TextColor3 = Color3.fromRGB(100, 255, 255) 
+            end
+            firePelletPrompt()
+            task.wait(3)
+            
+            -- LANGKAH 3: Loop Feed, Deteksi Kurang Pellet, & Auto Close
+            processFeedMachineAndClose()
+            
+            -- LANGKAH 4: Jeda & Kembali ke Posisi Awal
+            if UIStatus_Pellet then 
+                UIStatus_Pellet.Text = "STATUS: SIKLUS SELESAI, KEMBALI..." 
+                UIStatus_Pellet.TextColor3 = Color3.fromRGB(100, 255, 100) 
+            end
+            task.wait(4)
+            
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                character.HumanoidRootPart.CFrame = originalCFrame
+                character.HumanoidRootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end
+            
+            -- LANGKAH 5: Cooldown / Idle selama 30 Menit (1800 Detik)
+            local pelletCooldown = 1800
+            while pelletCooldown > 0 and ConfigData.AutoPellet do
+                if UIStatus_Pellet then
+                    local m = math.floor(pelletCooldown / 60)
+                    local s = pelletCooldown % 60
+                    UIStatus_Pellet.Text = string.format("PELLET COOLDOWN: %02dm %02ds", m, s)
+                    UIStatus_Pellet.TextColor3 = Color3.fromRGB(255, 200, 50)
+                end
+                task.wait(1)
+                pelletCooldown = pelletCooldown - 1
+            end
+            
+            if UIStatus_Pellet and ConfigData.AutoPellet then 
+                UIStatus_Pellet.Text = "AUTO PELLET: ON (MENUNGGU SIKLUS)" 
+                UIStatus_Pellet.TextColor3 = Color3.fromRGB(50, 255, 100) 
+            end
+            
+            isPelletExecuting = false
+            task.wait(1)
+        end
+    end
+end)
+
+-- ====== [THREAD 2]: AUTO FISHING / FARM MODE ENGINE ======
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if ConfigData.AutoFishingToggle then
+            local character = player.Character
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+            
+            -- Cek apakah ada Event/Pellet yang sedang berjalan
+            local isEventActive = (isWeatherTPBusy or isArcadiaTPBusy or isPelletExecuting)
+
+            if hrp then
+                if ConfigData.SelectedFarmingMode == "Map 1 (Throne Room)" then
+                    -- Penghitung waktu berjalan normal dilatar belakang
+                    ConfigData.DualMapSubTimer = ConfigData.DualMapSubTimer + 1
+                    if ConfigData.DualMapSubTimer >= rotateInterval then
+                        ConfigData.DualMapSubTimer = 0
+                        ConfigData.DualMapPoolIndex = (ConfigData.DualMapPoolIndex % #poolAngles) + 1
+                        SaveConfig()
+                    end
+                    
+                    local currentAngle = poolAngles[ConfigData.DualMapPoolIndex] or poolAngles[1]
+                    local targetCF = CFrame.new(standPositionRot) * CFrame.Angles(0, math.rad(currentAngle), 0)
+                    
+                    -- Hanya jalankan TP posisi farm jika sedang tidak mengutamakan Event/Pellet
+                    if not isEventActive and (hrp.Position - standPositionRot).Magnitude > 15 then
+                        hrp.CFrame = targetCF
+                        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    end
+                    
+                    local sisaRot = rotateInterval - ConfigData.DualMapSubTimer
+                    if UIStatus_Fishing then
+                        UIStatus_Fishing.Text = string.format("MAP 1 (POOL %d): %s", ConfigData.DualMapPoolIndex, formatSecondsToText(sisaRot))
+                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    end
+
+                elseif ConfigData.SelectedFarmingMode == "Map 2 (Canyon)" then
+                    if not isEventActive and (hrp.Position - map2Pos).Magnitude > 15 then
                         hrp.CFrame = map2CFrame
-                        hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) 
+                        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                     end
-
-                    local sisaPindah = dualMapInterval - ConfigData.DualMapTimer
                     if UIStatus_Fishing then
-                        if isArcadiaTPBusy then
-                            UIStatus_Fishing.Text = "MAP 2 (CANYON): PAUSED (AUTO TP ARCADIA)"
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        elseif isWeatherTPBusy then 
-                            UIStatus_Fishing.Text = "MAP 2 (CANYON): PAUSED (AUTO TP CUACA)"
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        else 
-                            UIStatus_Fishing.Text = "MAP 2 (CANYON) | SWITCH IN: " .. formatSecondsToText(sisaPindah)
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50) 
+                        UIStatus_Fishing.Text = "FARMING: MAP 2 (CANYON)"
+                        UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
+                    end
+
+                elseif ConfigData.SelectedFarmingMode == "Dual Map (Throne, Canyon)" then
+                    -- [FIXED] PENGHAPUSAN ARCADIA DARI ROTASI DAN MENGUBAH MENJADI DUAL MAP SAJA
+                    ConfigData.DualMapTimer = ConfigData.DualMapTimer + 1
+                    if ConfigData.DualMapTimer >= dualMapInterval then
+                        ConfigData.DualMapTimer = 0
+                        ConfigData.DualMapSubTimer = 0
+                        if ConfigData.DualMapCurrentState == "Map 2" then
+                            ConfigData.DualMapCurrentState = "Map 1"
+                        else
+                            ConfigData.DualMapCurrentState = "Map 2"
                         end
+                        SaveConfig()
                     end
-                    
-                    task.wait(1)
-                    if not isWeatherTPBusy and not isArcadiaTPBusy then
-                        ConfigData.DualMapTimer = ConfigData.DualMapTimer + 1
-                    end
-                    
-                    saveCounter = saveCounter + 1
-                    if saveCounter >= 5 then SaveConfig(); saveCounter = 0 end
-                end
 
-                -- Transisi ke Map 1
-                if ConfigData.DualMapTimer >= dualMapInterval and ConfigData.AutoDualMap then
-                    ConfigData.DualMapCurrentState = "Map 1"
-                    ConfigData.DualMapTimer = 0
-                    ConfigData.DualMapSubTimer = 0
-                    SaveConfig()
-                end
+                    local sisaSwitch = dualMapInterval - ConfigData.DualMapTimer
 
-            elseif ConfigData.DualMapCurrentState == "Map 1" then
-                hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                local targetAngle = math.rad(poolAngles[ConfigData.DualMapPoolIndex])
-                local targetCFrame = CFrame.new(standPositionRot) * CFrame.Angles(0, targetAngle, 0)
-
-                -- Initial teleport ke spot Map 1
-                if ConfigData.DualMapSubTimer == 0 and hrp and not isWeatherTPBusy and not isArcadiaTPBusy then
-                    for i = 1, 4 do 
-                        if hrp and hrp.Parent then 
-                            hrp.CFrame = targetCFrame
-                            hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) 
+                    if ConfigData.DualMapCurrentState == "Map 2" then
+                        if not isEventActive and (hrp.Position - map2Pos).Magnitude > 15 then
+                            hrp.CFrame = map2CFrame
+                            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                         end
-                        task.wait(0.05) 
-                    end
-                end
-
-                local wasBusy = isWeatherTPBusy or isArcadiaTPBusy
-                
-                while ConfigData.DualMapSubTimer < rotateInterval and ConfigData.DualMapTimer < dualMapInterval and ConfigData.AutoDualMap and ConfigData.DualMapCurrentState == "Map 1" do
-                    hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                    if isWeatherTPBusy or isArcadiaTPBusy then 
-                        wasBusy = true
-                    elseif wasBusy then 
-                        wasBusy = false
-                        if hrp and hrp.Parent then 
-                            hrp.CFrame = targetCFrame
-                            hrp.AssemblyLinearVelocity = Vector3.new(0,0,0) 
-                        end 
-                    end
-
-                    local sisaPindah = dualMapInterval - ConfigData.DualMapTimer
-                    local sisaRotate = rotateInterval - ConfigData.DualMapSubTimer
-                    
-                    if UIStatus_Fishing then
-                        if isArcadiaTPBusy then
-                            UIStatus_Fishing.Text = "MAP 1 (ROTATING): PAUSED (AUTO TP ARCADIA)"
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        elseif isWeatherTPBusy then 
-                            UIStatus_Fishing.Text = "MAP 1 (ROTATING): PAUSED (AUTO TP CUACA)"
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(255, 200, 50)
-                        else 
-                            UIStatus_Fishing.Text = "MAP 1 | SW: " .. formatSecondsToText(sisaPindah) .. " | RT: " .. formatSecondsToText(sisaRotate)
-                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(100, 200, 255) 
+                        if UIStatus_Fishing then
+                            UIStatus_Fishing.Text = string.format("DUAL MAP: MAP 2 (%s)", formatSecondsToText(sisaSwitch))
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
                         end
-                    end
-                    
-                    task.wait(1)
-                    if not isWeatherTPBusy and not isArcadiaTPBusy then
+
+                    elseif ConfigData.DualMapCurrentState == "Map 1" then
                         ConfigData.DualMapSubTimer = ConfigData.DualMapSubTimer + 1
-                        ConfigData.DualMapTimer = ConfigData.DualMapTimer + 1
-                    end
-                    
-                    saveCounter = saveCounter + 1
-                    if saveCounter >= 5 then SaveConfig(); saveCounter = 0 end
-                end
-                
-                -- Memutar map (Rotasi index)
-                if ConfigData.DualMapSubTimer >= rotateInterval and ConfigData.DualMapTimer < dualMapInterval and ConfigData.AutoDualMap then
-                    ConfigData.DualMapSubTimer = 0
-                    ConfigData.DualMapPoolIndex = ConfigData.DualMapPoolIndex + 1
-                    if ConfigData.DualMapPoolIndex > #poolAngles then ConfigData.DualMapPoolIndex = 1 end
-                    SaveConfig()
-                end
+                        if ConfigData.DualMapSubTimer >= rotateInterval then
+                            ConfigData.DualMapSubTimer = 0
+                            ConfigData.DualMapPoolIndex = (ConfigData.DualMapPoolIndex % #poolAngles) + 1
+                            SaveConfig()
+                        end
 
-                -- Transisi ke Map 2
-                if ConfigData.DualMapTimer >= dualMapInterval and ConfigData.AutoDualMap then
-                    ConfigData.DualMapCurrentState = "Map 2"
-                    ConfigData.DualMapTimer = 0
-                    ConfigData.DualMapSubTimer = 0
-                    SaveConfig()
+                        local currentAngle = poolAngles[ConfigData.DualMapPoolIndex] or poolAngles[1]
+                        local targetCF = CFrame.new(standPositionRot) * CFrame.Angles(0, math.rad(currentAngle), 0)
+
+                        if not isEventActive and (hrp.Position - standPositionRot).Magnitude > 15 then
+                            hrp.CFrame = targetCF
+                            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        end
+
+                        local sisaRot = rotateInterval - ConfigData.DualMapSubTimer
+                        if UIStatus_Fishing then
+                            UIStatus_Fishing.Text = string.format("DUAL MAP: MAP 1 (POOL %d): %s", ConfigData.DualMapPoolIndex, formatSecondsToText(sisaRot))
+                            UIStatus_Fishing.TextColor3 = Color3.fromRGB(50, 255, 100)
+                        end
+                    end
                 end
             end
-        else 
-            task.wait(1) 
         end
     end
 end)
